@@ -1596,7 +1596,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					)
 
 					if isActuallyTransparent and not usesAlphaAsData:
-						# ✅ REAL transparency
+						# REAL transparency
 
 						if bpy.app.version < (4,2,0):
 							matInfo["blenderMaterial"].blend_method = "BLEND"
