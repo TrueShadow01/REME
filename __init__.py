@@ -7,8 +7,8 @@ bl_info = {
     "location": "File > Import-Export",
     "description": "Import and export RE Engine Mesh files natively into Blender. No Noesis required.",
     "warning": "",
-    "wiki_url": "https://github.com/NSACloud/RE-Mesh-Editor",
-    "tracker_url": "https://github.com/NSACloud/RE-Mesh-Editor/issues",
+    "wiki_url": "https://github.com/TrueShadow01/REME",
+    "tracker_url": "https://github.com/TrueShadow01/REME/issues",
     "category": "Import-Export"}
 
 import bpy
@@ -840,7 +840,7 @@ class ImportREMesh(Operator, ImportHelper):
         editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-        print("https://github.com/NSACloud/RE-Mesh-Editor")
+        print("https://github.com/TrueShadow01/REME")
         
         bpy.context.scene["REMeshDefaultImportSettingsLoaded"] = 1
         
@@ -1096,7 +1096,7 @@ class ExportREMesh(Operator, ExportHelper):
         editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-        print("https://github.com/NSACloud/RE-Mesh-Editor")
+        print("https://github.com/TrueShadow01/REME")
         
         bpy.context.scene["REMeshDefaultExportSettingsLoaded"] = 1
         
@@ -1151,7 +1151,7 @@ class ImportREMDF(bpy.types.Operator, ImportHelper):
         editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-        print("https://github.com/NSACloud/RE-Mesh-Editor")
+        print("https://github.com/TrueShadow01/REME")
         multiFileImport = len(self.files) > 1
         hasImportErrors = False
         
@@ -1261,7 +1261,7 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
         editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-        print("https://github.com/NSACloud/RE-Mesh-Editor")
+        print("https://github.com/TrueShadow01/REME")
         success = exportMDFFile(self.filepath,self.targetCollection)
         if success:
             self.report({"INFO"},"Exported RE MDF successfully.")
@@ -1419,7 +1419,7 @@ class ImportRESFur(bpy.types.Operator, ImportHelper):
         editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-        print("https://github.com/NSACloud/RE-Mesh-Editor")
+        print("https://github.com/TrueShadow01/REME")
         multiFileImport = len(self.files) > 1
         hasImportErrors = False
         
@@ -1519,7 +1519,7 @@ class ExportRESFur(bpy.types.Operator, ExportHelper):
         editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-        print("https://github.com/NSACloud/RE-Mesh-Editor")
+        print("https://github.com/TrueShadow01/REME")
         success = exportSFurFile(self.filepath,self.targetCollection)
         if success:
             self.report({"INFO"},"Exported RE SFur successfully.")
@@ -1763,7 +1763,7 @@ def re_mdf_export(self, context):
 """
 
 class IMPORT_MT_re_mesh_editor(bpy.types.Menu):
-    bl_label = "RE Mesh Editor"
+    bl_label = "RE Mesh Editor (Community Maintained)"
     bl_idname = "IMPORT_MT_re_mesh_editor"
     
     def draw(self, context):
