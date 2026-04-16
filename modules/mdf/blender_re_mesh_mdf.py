@@ -392,14 +392,19 @@ def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 	
 	
 	inputPath = None
-	texVersion = texVersionDict.get(mdfVersion,"")
+	texVersion = texVersionDict.get(mdfVersion, None)
 	for chunkPath in chunkPathList:
-		inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath,"streaming",baseTexturePath+f".tex{texVersion}"))+"*")#Searches for texture even if the version is known because capcom can add platform or lang extensions
-		
-		if inputPath == None:
-			inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath,baseTexturePath+f".tex{texVersion}"))+"*")
-		
-		
+		# Try version-specific first (if known)
+		if texVersion:
+			inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath, "streaming", baseTexturePath + f".tex{texVersion}")) + "*")
+		if inputPath is None:
+			inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath, baseTexturePath + f".tex{texVersion}")) + "*")
+
+		# Fallback: ANY .tex version
+		if inputPath is None:
+			inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath, "streaming", baseTexturePath + ".tex")) + "*")
+		if inputPath is None:
+			inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath, baseTexturePath + ".tex")) + "*")
 		
 		if inputPath != None:
 			break
@@ -1566,68 +1571,33 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				
 				alphaClippingNode = None
 				#if hasAlpha:
-				if matInfo["alphaSocket"] != None:
-					
-					
-					clippingThresholdOutSocket = None
+				if matInfo["alphaSocket"] is not None:
 
-					if "Nuki" in matInfo["mPropDict"]:#I wish capcom didn't use 1000 different names for the same thing
-						#clippingThresholdNode = addPropertyNode(matInfo["mPropDict"]["Nuki"], matInfo["currentPropPos"], nodeTree)
-						nukiNode = addPropertyNode(matInfo["mPropDict"]["Nuki"], matInfo["currentPropPos"], nodeTree)
-						if "UseNuki_Dissolve" in matInfo["mPropDict"]:
-							useNukiNode = addPropertyNode(matInfo["mPropDict"]["UseNuki_Dissolve"], matInfo["currentPropPos"], nodeTree)
-							dissolveNode = addPropertyNode(matInfo["mPropDict"]["Nuki_Dissolve"], matInfo["currentPropPos"], nodeTree)
-							
-							mixNukiNode = nodes.new("ShaderNodeMixRGB")
-							mixNukiNode.location = useNukiNode.location + Vector((300,0))
-							links.new(nukiNode.outputs["Value"],mixNukiNode.inputs["Color1"])
-							links.new(dissolveNode.outputs["Value"],mixNukiNode.inputs["Color2"])
-							links.new(useNukiNode.outputs["Value"],mixNukiNode.inputs["Fac"])
-							clippingThresholdOutSocket = mixNukiNode.outputs["Color"]
-							
-						else:
-							clippingThresholdOutSocket = nukiNode.outputs["Value"]
-					elif "Nuki_Dissolve" in matInfo["mPropDict"]:
-						dissolveNode = addPropertyNode(matInfo["mPropDict"]["Nuki_Dissolve"], matInfo["currentPropPos"], nodeTree)
-						clippingThresholdOutSocket = dissolveNode.outputs["Value"]
-					
-					#Using this as the clipping threshold might not be right but certain things don't work correctly if it's the default threshold instead
-					elif "AlphaTestRef" in matInfo["mPropDict"]:
-						dissolveNode = addPropertyNode(matInfo["mPropDict"]["AlphaTestRef"], matInfo["currentPropPos"], nodeTree)
-						clippingThresholdOutSocket = dissolveNode.outputs["Value"]
-					#	correctionNode = nodes.new("ShaderNodeMath")
-					#	correctionNode.location =  (dissolveNode.location[0] + 300,dissolveNode.location[1])
-					#	correctionNode.operation = "SUBTRACT"
-					#	correctionNode.inputs[0].default_value = 1
-					#	links.new(dissolveNode.outputs["Value"],correctionNode.inputs[1])
-					#	clippingThresholdOutSocket = correctionNode.outputs["Value"]
-					
-	
-					elif "DissolveThreshold" in matInfo["mPropDict"]:
-						dissolveNode = addPropertyNode(matInfo["mPropDict"]["DissolveThreshold"], matInfo["currentPropPos"], nodeTree)
-						clippingThresholdOutSocket = dissolveNode.outputs["Value"]
-					
-					if not matInfo["isAlphaBlend"] and "reflectivetransparent" not in matInfo["mmtrName"] and "alphadissolve" not in matInfo["mmtrName"] and "decal_basealpha" not in matInfo["mmtrName"]:
-						
-						
-						if "hair" not in matInfo["mmtrName"] and "BaseAlphaMap" not in matInfo["textureNodeDict"]:
-							alphaClippingNode = nodes.new("ShaderNodeMath")
-							alphaClippingNode.location = nodeBSDF.location + Vector((-300,-400))
-							alphaClippingNode.operation = "GREATER_THAN"
-							alphaClippingNode.outputs["Value"].default_value = 1.0
-							
-							
-							links.new(alphaClippingNode.outputs["Value"],nodeBSDF.inputs["Alpha"])
-							if clippingThresholdOutSocket != None:
-								links.new(clippingThresholdOutSocket,alphaClippingNode.inputs[1])
-							
-							if matInfo["alphaSocket"] != None:
-								
-								links.new(matInfo["alphaSocket"],alphaClippingNode.inputs[0])
-						else:#Hack to bypass clipping because alpha clipping with hair is being a pain
-							if matInfo["alphaSocket"] != None: 
-								links.new(matInfo["alphaSocket"],nodeBSDF.inputs["Alpha"])
-					else:
+					mmtr = matInfo["mmtrName"].lower()
+					shaderType = matInfo["shaderType"]
+
+					# --- SMART TRANSPARENCY DETECTION ---
+					isActuallyTransparent = (
+						matInfo["isAlphaBlend"] or
+						"hair" in mmtr or
+						"transparent" in mmtr or
+						"glass" in mmtr or
+						"decal" in mmtr or
+						"alpha" in mmtr or
+						shaderType in alphaBlendShaderTypes
+					)
+
+					# --- PRAGMATA / MODERN RE ENGINE FIX ---
+					# These games use alpha as DATA, not transparency
+					usesAlphaAsData = (
+						matInfo["gameName"] in ["PRAG"] or
+						"BaseAlphaMap" in matInfo["textureNodeDict"] or
+						"ATOS" in matInfo["textureNodeDict"]
+					)
+
+					if isActuallyTransparent and not usesAlphaAsData:
+						# REAL transparency
+
 						if bpy.app.version < (4,2,0):
 							matInfo["blenderMaterial"].blend_method = "BLEND"
 							matInfo["blenderMaterial"].shadow_method = "NONE"
@@ -1635,11 +1605,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							matInfo["blenderMaterial"].surface_render_method = "BLENDED"
 							matInfo["blenderMaterial"].use_transparent_shadow = True
 							matInfo["disableShadowCast"] = True
-						
-						links.new(matInfo["alphaSocket"],nodeBSDF.inputs["Alpha"])
-					#Blender removed blend and shadow method in 4.2+ so everything will just be alpha hashed now
-					#blenderMaterial.blend_method = "CLIP"
-					#blenderMaterial.shadow_method = "CLIP"
+
+						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+
+				else:
+					# ❌ Treat alpha as data → DO NOT CLIP
+					pass
 				
 				if matInfo["sheenSocket"] != None:
 					if bpy.app.version < (4,0,0):

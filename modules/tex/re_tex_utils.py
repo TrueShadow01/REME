@@ -16,6 +16,8 @@ import os
 VERSION_MHWILDS_BETA = 240701001
 VERSION_MHWILDS = 241106027
 
+def find_file_case_insensitive(base, path):
+    parts = path.replace()
 
 def TexToDDS(tex, imageIndex):
     """ Generates a DDS file from the 'imageIndex'th image in the tex file"""
@@ -273,16 +275,16 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False):
 def ImageListToDDS(imageConvertList,outDir,generateMipMaps):
 
     texConv = Texconv()
-	#Tuple containing image path, dds format
+    #Tuple containing image path, dds format
     for inPath,ddsFormat in imageConvertList:
         try:
-	        texConv.convert_to_dds(
-				file = inPath,
-				dds_fmt = ddsFormat,
-				out = outDir,
-				no_mip = not generateMipMaps,
-				verbose = True
-	        )
+            texConv.convert_to_dds(
+                file = inPath,
+                dds_fmt = ddsFormat,
+                out = outDir,
+                no_mip = not generateMipMaps,
+                verbose = True
+            )
         except Exception as err:
             print(f"Failed to convert {inPath} - {err}")
     unload_texconv()
