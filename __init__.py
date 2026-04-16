@@ -1762,7 +1762,7 @@ def re_mdf_export(self, context):
     self.layout.operator(ExportREMDF.bl_idname, text="RE MDF (.mdf2.x)")
 """
 
-class IMPORT_MT_re_mesh_editor(bpy.types.Menu):
+class IMPORT_MT_re_mesh_editor_community(bpy.types.Menu):
     bl_label = "RE Mesh Editor (Community Maintained)"
     bl_idname = "IMPORT_MT_re_mesh_editor"
     
@@ -1775,10 +1775,10 @@ class IMPORT_MT_re_mesh_editor(bpy.types.Menu):
         layout.operator(ImportRESFur.bl_idname, text="RE SFur (.sfur.x) (Shell Fur)",icon = "CURVES_DATA")
 
 def re_mesh_editor_import(self, context):
-    self.layout.menu("IMPORT_MT_re_mesh_editor",icon = "MOD_LINEART")
+    self.layout.menu("IMPORT_MT_re_mesh_editor_community",icon = "MOD_LINEART")
     
-class EXPORT_MT_re_mesh_editor(bpy.types.Menu):
-    bl_label = "RE Mesh Editor"
+class EXPORT_MT_re_mesh_editor_community(bpy.types.Menu):
+    bl_label = "RE Mesh Editor (Community Maintained)"
     bl_idname = "EXPORT_MT_re_mesh_editor"
     
     def draw(self, context):
