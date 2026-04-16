@@ -24,3 +24,4 @@ More updates coming soon.
 - [matyalatte](https://github.com/matyalatte/Texconv-Custom-DLL) - DirectX Texconv DLL library
 - [PittRBM](https://x.com/wDnrbm) - NRRT texture node setup
 - Ridog - NRRT normal conversion code used as reference
+- [NSACloud](https://github.com/NSACloud) - Original RE-Mesh-Editor Plugin Author
