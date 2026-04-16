@@ -12,7 +12,6 @@ bl_info = {
     "category": "Import-Export"}
 
 import bpy
-from . import addon_updater_ops
 from datetime import datetime
 import os
 from bpy_extras.io_utils import ExportHelper,ImportHelper
@@ -152,7 +151,7 @@ from .modules.workspace.re_mod_workspace_operators import (
     )
 
 from .modules.workspace.re_mod_workspace_propertyGroups import (
-    ModWorkspaceToolPanelPropertyGroup,
+    ModWorkspaceToolPanelPropertyGroup_CM,
     ConvertedMaterialEntryPropertyGroup,
     REMOD_UL_MaterialConversionList,
     )
@@ -215,7 +214,7 @@ def setModDirectoryFromFilePath(filePath):
 class WM_OT_OpenTextureCacheFolder(Operator):
     bl_label = "Open Texture Cache Folder"
     bl_description = "Opens the texture cache folder in File Explorer"
-    bl_idname = "re_mesh.open_texture_cache_folder"
+    bl_idname = "re_mesh_cm.open_texture_cache_folder"
 
     def execute(self, context):
         try:
@@ -228,7 +227,7 @@ class WM_OT_OpenTextureCacheFolder(Operator):
 class WM_OT_CheckTextureCacheSize(Operator):
     bl_label = "Check Cache Size"
     bl_description = "Shows the current size of the texture cache folder."
-    bl_idname = "re_mesh.check_texture_cache_size"
+    bl_idname = "re_mesh_cm.check_texture_cache_size"
 
     def execute(self, context):
         checkTextureCacheSize()
@@ -237,7 +236,7 @@ class WM_OT_CheckTextureCacheSize(Operator):
 class WM_OT_ClearTextureCacheFolder(Operator):
     bl_label = "Clear Texture Cache Folder"
     bl_description = "Deletes all cached converted textures. Note that any saved blend files will lose their textures if the cache is cleared."
-    bl_idname = "re_mesh.clear_texture_cache_folder"
+    bl_idname = "re_mesh_cm.clear_texture_cache_folder"
     def draw(self,context):
         layout = self.layout
         layout.label(text="Are you sure you want to delete all cached textures?")
@@ -299,7 +298,7 @@ class ChunkPathPropertyGroup(bpy.types.PropertyGroup):
 
 
 class AddItemOperator(bpy.types.Operator):
-    bl_idname = "re_mesh.chunk_path_list_add_item"
+    bl_idname = "re_mesh_cm.chunk_path_list_add_item"
     bl_description = "Add path to the extracted chunk's natives\STM\ folder.\n"+r"Example: I:\RE4_EXTRACT\re_chunk_000\natives\STM"
     bl_label = "Add Path"
     
@@ -311,7 +310,7 @@ class AddItemOperator(bpy.types.Operator):
 
 # Operator to remove an item from the list
 class RemoveItemOperator(bpy.types.Operator):
-    bl_idname = "re_mesh.chunk_path_list_remove_item"
+    bl_idname = "re_mesh_cm.chunk_path_list_remove_item"
     bl_description = "Remove chunk path from the list"
     bl_label = "Remove Selected Path"
 
@@ -325,7 +324,7 @@ class RemoveItemOperator(bpy.types.Operator):
 
 # Operator to reorder items in the list
 class ReorderItemOperator(bpy.types.Operator):
-    bl_idname = "re_mesh.chunk_path_list_reorder_item"
+    bl_idname = "re_mesh_cm.chunk_path_list_reorder_item"
     bl_description = "Change the order in which files will be searched"
     bl_label = "Reorder Item"
 
@@ -666,10 +665,9 @@ class REMeshPreferences(AddonPreferences):
         row = layout.row(align=True)
         row.operator("re_mesh.chunk_path_list_reorder_item", text="Move Up").direction = 'UP'
         row.operator("re_mesh.chunk_path_list_reorder_item", text="Move Down").direction = 'DOWN'
-        addon_updater_ops.update_settings_ui(self,context)
 class ImportREMesh(Operator, ImportHelper):
     '''Import RE Engine Mesh File'''
-    bl_idname = "re_mesh.importfile"
+    bl_idname = "re_mesh_cm.importfile"
     bl_label = "Import RE Mesh"
     bl_options = {'PRESET', "REGISTER", "UNDO"}
     files : CollectionProperty(
@@ -925,7 +923,7 @@ def update_targetMeshCollection(self,context):
             browserSpace.params.filename = self.targetCollection.split(".mesh")[0]+".mesh" + self.filename_ext
 class ExportREMesh(Operator, ExportHelper):
     '''Export RE Engine Mesh File'''
-    bl_idname = "re_mesh.exportfile"
+    bl_idname = "re_mesh_cm.exportfile"
     bl_label = "Export RE Mesh"
     bl_options = {'PRESET'}
     
@@ -1545,7 +1543,7 @@ classes = [
     REMeshPreferences,
     #mod workspace
     #property groups
-    ModWorkspaceToolPanelPropertyGroup,
+    ModWorkspaceToolPanelPropertyGroup_CM,
     ConvertedMaterialEntryPropertyGroup,
     REMOD_UL_MaterialConversionList,
     #operators
@@ -1764,7 +1762,7 @@ def re_mdf_export(self, context):
 
 class IMPORT_MT_re_mesh_editor_community(bpy.types.Menu):
     bl_label = "RE Mesh Editor (Community Maintained)"
-    bl_idname = "IMPORT_MT_re_mesh_editor"
+    bl_idname = "IMPORT_MT_re_mesh_editor_community"
     
     def draw(self, context):
         layout = self.layout
@@ -1777,7 +1775,7 @@ class IMPORT_MT_re_mesh_editor_community(bpy.types.Menu):
 def re_mesh_editor_import(self, context):
     self.layout.menu("IMPORT_MT_re_mesh_editor_community",icon = "MOD_LINEART")
     
-class EXPORT_MT_re_mesh_editor_community(bpy.types.Menu):
+class EXPORT_MT_re_mesh_editor(bpy.types.Menu):
     bl_label = "RE Mesh Editor (Community Maintained)"
     bl_idname = "EXPORT_MT_re_mesh_editor"
     
@@ -1793,11 +1791,10 @@ def re_mesh_editor_export(self, context):
     self.layout.menu("EXPORT_MT_re_mesh_editor",icon = "MOD_LINEART")
 
 def register():
-    addon_updater_ops.register(bl_info)
     for classEntry in classes:
         bpy.utils.register_class(classEntry)
         
-    bpy.utils.register_class(IMPORT_MT_re_mesh_editor)
+    bpy.utils.register_class(IMPORT_MT_re_mesh_editor_community)
     bpy.utils.register_class(EXPORT_MT_re_mesh_editor)
     
     if (3, 3, 0) > bpy.app.version:
@@ -1807,7 +1804,7 @@ def register():
     #REGISTER PROPERTY GROUP PROPERTIES
     bpy.types.WindowManager.enableModFileTracking = bpy.props.BoolProperty(default=False)
     bpy.types.Scene.re_mdf_toolpanel = PointerProperty(type=MDFToolPanelPropertyGroup)
-    bpy.types.Scene.re_modworkspace_toolpanel = PointerProperty(type=ModWorkspaceToolPanelPropertyGroup)
+    bpy.types.Scene.re_modworkspace_toolpanel = PointerProperty(type=ModWorkspaceToolPanelPropertyGroup_CM)
     bpy.types.Object.re_mdf_material = PointerProperty(type=MDFMaterialPropertyGroup)
     
     bpy.types.Object.re_sfur_data = PointerProperty(type=SFurEntryPropertyGroup)
@@ -1833,11 +1830,10 @@ def register():
     
 def unregister():
     del bpy.types.WindowManager.enableModFileTracking
-    addon_updater_ops.unregister()
     for classEntry in classes:
         bpy.utils.unregister_class(classEntry)
         
-    bpy.utils.unregister_class(IMPORT_MT_re_mesh_editor)
+    bpy.utils.unregister_class(IMPORT_MT_re_mesh_editor_community)
     bpy.utils.unregister_class(EXPORT_MT_re_mesh_editor)
     
     if (3, 3, 0) > bpy.app.version:

@@ -16,7 +16,7 @@ from ..gen_functions import splitNativesPath
 from ..blender_utils import showErrorMessageBox
 class WM_OT_DeleteLoose(Operator):
 	bl_label = "Delete Loose Geometry"
-	bl_idname = "re_mesh.delete_loose"
+	bl_idname = "re_mesh_cm.delete_loose"
 	bl_description = "Deletes loose vertices and edges with no faces on selected meshes"
 	def execute(self, context):
 		if context.selected_objects != []:
@@ -38,7 +38,7 @@ class WM_OT_DeleteLoose(Operator):
 		return {'FINISHED'}
 class WM_OT_RenameMeshToREFormat(Operator):
 	bl_label = "Rename Meshes"
-	bl_idname = "re_mesh.rename_meshes"
+	bl_idname = "re_mesh_cm.rename_meshes"
 	bl_description = "Renames selected meshes to RE mesh naming scheme (Example: Group_0_Sub_0__Shirts_Mat)"
 	def execute(self, context):
 		groupIndexDict = dict()
@@ -77,7 +77,7 @@ class WM_OT_RenameMeshToREFormat(Operator):
 class WM_OT_RemoveZeroWeightVertexGroups(Operator):
 	"""Remove all vertex groups that have no weight assigned to them"""
 	bl_label = "Remove Empty Vertex Groups"
-	bl_idname = "re_mesh.remove_zero_weight_vertex_groups"
+	bl_idname = "re_mesh_cm.remove_zero_weight_vertex_groups"
 
 	def execute(self, context):
 		if context.selected_objects != []:
@@ -100,7 +100,7 @@ class WM_OT_RemoveZeroWeightVertexGroups(Operator):
 class WM_OT_LimitTotalNormalizeAll(Operator):
 	"""Limits the amount of bones influences per vertex and normalizes the weights of all vertex groups for all selected meshes"""
 	bl_label = "Limit Total and Normalize All"
-	bl_idname = "re_mesh.limit_total_normalize"
+	bl_idname = "re_mesh_cm.limit_total_normalize"
 	maxWeights: EnumProperty(
 		name="Weight Limit",
 		description="Apply Data to attribute.",
@@ -138,7 +138,7 @@ class WM_OT_LimitTotalNormalizeAll(Operator):
 		return {'FINISHED'}
 class WM_OT_CreateMeshCollection(Operator):
 	bl_label = "Create Mesh Collection"
-	bl_idname = "re_mesh.create_mesh_collection"
+	bl_idname = "re_mesh_cm.create_mesh_collection"
 	bl_description = "Creates a collection for RE Engine meshes"
 	bl_options = {'UNDO'}
 	collectionName : bpy.props.StringProperty(name = "Mesh Name",
@@ -313,7 +313,7 @@ def populateCollectionList(itemList,collection,recursionLevel,parentName):
 					print(f"Batch Export: Cannot auto determine path for {item.name}: {str(err)}")
 class WM_OT_REBatchExporter(Operator):
 	bl_label = "RE Batch Exporter"
-	bl_idname = "re_mesh.batch_exporter"
+	bl_idname = "re_mesh_cm.batch_exporter"
 	bl_description = "Export all selected RE Engine files quickly"
 	bl_options = {'INTERNAL'}
 	
@@ -571,7 +571,7 @@ class WM_OT_REBatchExporter(Operator):
 
 class WM_OT_SolveRepeatedUVs(Operator):
 	bl_label = "Solve Repeated UVs"
-	bl_idname = "re_mesh.solve_repeated_uvs"
+	bl_idname = "re_mesh_cm.solve_repeated_uvs"
 	bl_description = "Splits connected UV islands"
 	def execute(self, context):
 
@@ -590,7 +590,7 @@ class WM_OT_SolveRepeatedUVs(Operator):
 	
 class WM_OT_QuickBatchExport(Operator):
 	bl_label = "Quick Batch Export"
-	bl_idname = "re_mesh.quick_batch_export"
+	bl_idname = "re_mesh_cm.quick_batch_export"
 	bl_description = "Single click batch export. Works the same as RE Batch Export but there is no prompt to configure settings.\nThe previous settings of RE Batch Export are used."
 	def execute(self, context):
 		bpy.ops.re_mesh.batch_exporter()
