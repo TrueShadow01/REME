@@ -1353,11 +1353,11 @@ def register(bl_info):
     updater.private_token = None  # "tokenstring"
 
     # Choose your own username, must match website (not needed for GitLab).
-    updater.user = "NSACloud"
+    updater.user = "TrueShadow01"
 
     # Choose your own repository, must match git name for GitHUb and Bitbucket,
     # for GitLab use project ID (numbers only).
-    updater.repo = "RE-Mesh-Editor"
+    updater.repo = "REME"
 
     # updater.addon = # define at top of module, MUST be done first
 

@@ -12,7 +12,7 @@ from bpy.props import (StringProperty,
 
 from ..mdf.re_mdf_presets import reloadPresets
 		
-class ModWorkspaceToolPanelPropertyGroup(bpy.types.PropertyGroup):
+class ModWorkspaceToolPanelPropertyGroup_CM(bpy.types.PropertyGroup):
 	
 	enableModFileTracking: BoolProperty(
 		name = "Mod File Tracking",
