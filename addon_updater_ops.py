@@ -1362,7 +1362,7 @@ def register(bl_info):
     # updater.addon = # define at top of module, MUST be done first
 
     # Website for manual addon download, optional but recommended to set.
-    updater.website = "https://github.com/NSACloud/RE-Mesh-Editor"
+    updater.website = "https://github.com/TrueShadow01/REME"
 
     # Addon subfolder path.
     # "sample/path/to/addon"
