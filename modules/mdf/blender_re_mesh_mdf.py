@@ -1609,7 +1609,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 
 				else:
-					# ❌ Treat alpha as data → DO NOT CLIP
+					# Treat alpha as data → DO NOT CLIP
 					pass
 				
 				if matInfo["sheenSocket"] != None:
