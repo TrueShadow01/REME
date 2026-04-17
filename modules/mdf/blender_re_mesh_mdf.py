@@ -1583,24 +1583,32 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					isTransparent = (
 						matInfo["isAlphaBlend"] or
 						shaderType in alphaBlendShaderTypes or
-						any(x in mmtr for x in ["hair", "glass", "decal", "transparent"])
+						any(x in mmtr for x in ["glass", "decal", "transparent"])
 					)
+
+					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "cap"])
 
 					usesAlphaAsMask = (
-						matInfo["isMaskAlphaMMTR"] or
-						"BaseAlphaMap" in matInfo["textureNodeDict"]
+						matInfo["isMaskAlphaMMTR"]
 					)
 
-					if isTransparent:
+					if usesAlphaAsMask:
+						pass
+					elif isTransparent:
 						matInfo["blenderMaterial"].blend_method = "BLEND"
 						matInfo["blenderMaterial"].shadow_method = "NONE"
-
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-					elif not usesAlphaAsMask:
+					elif isCutout:
+						matInfo["blenderMaterial"].blend_method = "CLIP"
+						matInfo["blenderMaterial"].alpha_threshold = 0.5
+
+						if bpy.app.version < (4, 2, 0):
+							matInfo["blenderMaterial"].shadow_method = "CLIP"
+						
+						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+					else:
 						matInfo["blenderMaterial"].blend_method = "HASHED"
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-				else:
-					pass
 				
 				if matInfo["sheenSocket"] != None:
 					if bpy.app.version < (4,0,0):
