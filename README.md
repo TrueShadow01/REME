@@ -14,6 +14,32 @@ The original projects is no longer being updated, so this fork continues develop
 
 More updates coming soon.
 
+# Roadmap
+### Short-Term
+- Fix material accuracy issues
+  - Improve alpha handling (transparency vs data maps like ATOS / BaseAlphaMap)
+  - Correct UV mapping for special materials (e.g. hair, eyebrows, decals)
+- Resolve texture misalignment in complex shaders (HairOverMap, detail maps)
+- Ensure consistency between original addon and forked version behaviour
+
+### Mid-Term
+- Implement smarter shader detection
+  - Automatically detect when materials require UV1 instead of UV0
+  - Improve handling of hair, skin and eye materials
+- Refactor material pipelines
+  - Reduce hardcoded cases
+  - Make node generation more modular and predictable
+- Improve compatibility with newer RE Engine titles (RE9, MHWILDS, etc.)
+
+### Long-Term
+- Achieve near 1:1 visual parity with in-game materials
+- Support more advanced shader features:
+  - Proper transluceny handling
+  - Better subsurface scattering (SSS)
+  - Accurate hair shading
+- Optimize import performance and reduce redundant texture processing
+- Clean up and document the codebase for easier contributions
+
 # Requirements
 - Blender 4.3.2 or higher
 
