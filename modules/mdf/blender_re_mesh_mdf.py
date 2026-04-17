@@ -1414,6 +1414,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 								matInfo["roughnessNodeLayerGroup"].addMixLayer(currentMaskNode.outputs["Alpha"],factorOutSocket = None,mixType = "MIX",mixFactor = 1.0)
 				#Finish process by linking to bsdf shader
 				
+				if matInfo["alphaSocket"] is None and "ATOCorASOC" in matInfo["textureNodeDict"]:
+					atosNode = matInfo["textureNodeDict"]["ATOCorASOC"]
+
+					matInfo["alphaSocket"] = atosNode.outputs["Alpha"]
 				
 				if matInfo["cavityNodeLayerGroup"].currentOutSocket != None:#Add cavity layers into AO
 					matInfo["aoNodeLayerGroup"].addMixLayer(matInfo["cavityNodeLayerGroup"].currentOutSocket,factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 0.6)
@@ -1576,40 +1580,26 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					mmtr = matInfo["mmtrName"].lower()
 					shaderType = matInfo["shaderType"]
 
-					# --- SMART TRANSPARENCY DETECTION ---
-					isActuallyTransparent = (
+					isTransparent = (
 						matInfo["isAlphaBlend"] or
-						"hair" in mmtr or
-						"transparent" in mmtr or
-						"glass" in mmtr or
-						"decal" in mmtr or
-						"alpha" in mmtr or
-						shaderType in alphaBlendShaderTypes
+						shaderType in alphaBlendShaderTypes or
+						any(x in mmtr for x in ["hair", "glass", "decal", "transparent"])
 					)
 
-					# --- PRAGMATA / MODERN RE ENGINE FIX ---
-					# These games use alpha as DATA, not transparency
-					usesAlphaAsData = (
-						matInfo["gameName"] in ["PRAG"] or
-						"BaseAlphaMap" in matInfo["textureNodeDict"] or
-						"ATOS" in matInfo["textureNodeDict"]
+					usesAlphaAsMask = (
+						matInfo["isMaskAlphaMMTR"] or
+						"BaseAlphaMap" in matInfo["textureNodeDict"]
 					)
 
-					if isActuallyTransparent and not usesAlphaAsData:
-						# REAL transparency
-
-						if bpy.app.version < (4,2,0):
-							matInfo["blenderMaterial"].blend_method = "BLEND"
-							matInfo["blenderMaterial"].shadow_method = "NONE"
-						else:
-							matInfo["blenderMaterial"].surface_render_method = "BLENDED"
-							matInfo["blenderMaterial"].use_transparent_shadow = True
-							matInfo["disableShadowCast"] = True
+					if isTransparent:
+						matInfo["blenderMaterial"].blend_method = "BLEND"
+						matInfo["blenderMaterial"].shadow_method = "NONE"
 
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-
+					elif not usesAlphaAsMask:
+						matInfo["blenderMaterial"].blend_method = "HASHED"
+						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 				else:
-					# Treat alpha as data → DO NOT CLIP
 					pass
 				
 				if matInfo["sheenSocket"] != None:
