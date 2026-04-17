@@ -732,10 +732,35 @@ def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos):
 	
 	if len(imageList) == 1 or len(imageList) > MAX_ARRAY_IMPORT_SIZE:
 		imageNode = nodeTree.nodes.new('ShaderNodeTexImage')
+
+		# UV FIX BEGIN
+		uvNode = None
+
+		isHair = False
+		if "hair" in textureType.lower():
+			isHair = True
+		
+		uvMapName = "UVMap0"
+		if isHair:
+			uvMapName = "UVMap1"
+		
+		uvNodeName = f"{uvMapName}Node"
+
+		if uvMapName in nodeTree.nodes:
+			uvNode = nodeTree.nodes[uvNodeName]
+		else:
+			uvNode = nodeTree.nodes.new("ShaderNodeUVMap")
+			uvNode.name = uvNodeName
+			uvNode.uv_map = uvMapName
+			uvNode.location = (currentPos[0] - 300, currentPos[1] + 200)
+		
+		nodeTree.links.new(uvNode.outputs["UV"], imageNode.inputs["Vector"])
+		# UV FIX END
+
 		imageNode.name = textureType
 		imageNode.label = textureType
 		imageNode.location = currentPos
-		
+
 		if imageList[0] != None:
 			imageNode.image = imageList[0]
 			#print(f"image node {textureType} path:{imageList[0].filepath}")
