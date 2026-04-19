@@ -123,11 +123,9 @@ def ReadCompressedPosBuffer(vertexPosBuffer,bitFlag,center,relOffset):
 		byte3Array = np.frombuffer(vertexPosBuffer,dtype="<3b")
 		posArray = np.zeros(len(byte3Array),np.dtype("<3f"))
 		posArray = byte3Array * (1.0/255)
-		
-		#posArray[:,0] = byte3Array[:,0] * (1.0/255)
-		#posArray[:,1] = byte3Array[:,1] * (1.0/255)
-		#posArray[:,2] = byte3Array[:,2] * (1.0/255)
-		posArray[:] = 0#TODO FIX 24 bit import
+		posArray[:,0] = byte3Array[:,0] * (1.0/255)
+		posArray[:,1] = byte3Array[:,1] * (1.0/255)
+		posArray[:,2] = byte3Array[:,2] * (1.0/255)
 	elif bitFlag.flags.use32BitPos:
 		#print("DEBUG 32 bit pos")
 		packedIntArray = np.frombuffer(vertexPosBuffer,dtype="<I")
