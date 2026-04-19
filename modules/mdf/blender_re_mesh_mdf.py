@@ -450,9 +450,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		#print(materialName)
 		blenderMaterial = meshMaterialDict[materialName]
 		blenderMaterial.use_nodes = True
-		blenderMaterial.blend_method = "HASHED"#Blender 4.2 removed clip and opaque blend options, so everything has to be hash or blend
 		if bpy.app.version < (4,2,0):
-			blenderMaterial.shadow_method = "HASHED"
+			blenderMaterial.blend_method = "HASHED"#Blender 4.2 removed clip and opaque blend options, so everything has to be hash or blend
 		blenderMaterial.node_tree.nodes.clear()
 		mdfMaterial = mdfMaterialDict.get(materialName,None)
 		textureNodeInfoList = []
@@ -1595,8 +1594,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if usesAlphaAsMask:
 						pass
 					elif isTransparent:
+						print(bpy.app.version < (4,2,0))
 						matInfo["blenderMaterial"].blend_method = "BLEND"
-						matInfo["blenderMaterial"].shadow_method = "NONE"
+
+						if bpy.app.version < (4,2,0):
+							matInfo["blenderMaterial"].shadow_method = "NONE"
+						
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 					elif isCutout:
 						matInfo["blenderMaterial"].blend_method = "CLIP"

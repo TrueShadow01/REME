@@ -362,7 +362,7 @@ class WM_OT_REBatchExporter(Operator):
 			os.makedirs(os.path.split(exportItem.path)[0],exist_ok = True)
 			if exportItem.exportType == "MESH":
 				try:
-					bpy.ops.re_mesh.exportfile(
+					bpy.ops.re_mesh_cm.exportfile(
 						filepath = exportItem.path,
 						targetCollection = exportItem.name,
 						exportAllLODs = exportItem.exportAllLODs,
@@ -593,5 +593,5 @@ class WM_OT_QuickBatchExport(Operator):
 	bl_idname = "re_mesh_cm.quick_batch_export"
 	bl_description = "Single click batch export. Works the same as RE Batch Export but there is no prompt to configure settings.\nThe previous settings of RE Batch Export are used."
 	def execute(self, context):
-		bpy.ops.re_mesh.batch_exporter()
+		bpy.ops.re_mesh_cm.batch_exporter()
 		return {'FINISHED'}

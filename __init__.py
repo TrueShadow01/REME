@@ -604,13 +604,13 @@ class REMeshPreferences(AddonPreferences):
         if self.textureCacheCheckDate == "":
             checkTextureCacheSize()
         row.label(text=f"Cache Size: {self.textureCacheSizeString}")
-        row.operator("re_mesh.check_texture_cache_size",icon = "FILE_REFRESH",text = "")
+        row.operator("re_mesh_cm_cm.check_texture_cache_size",icon = "FILE_REFRESH",text = "")
         box.label(text=f"Last Checked: {self.textureCacheCheckDate}")
         
         
         
-        box.operator("re_mesh.open_texture_cache_folder")
-        box.operator("re_mesh.clear_texture_cache_folder")
+        box.operator("re_mesh_cm.open_texture_cache_folder")
+        box.operator("re_mesh_cm.clear_texture_cache_folder")
         
         op.url = 'https://ko-fi.com/nsacloud'
         
@@ -658,13 +658,13 @@ class REMeshPreferences(AddonPreferences):
         layout.prop(self, "saveChunkPaths")
         layout.template_list("MESH_UL_ChunkPathList", "", self, "chunkPathList_items", self, "chunkPathList_index",rows = 3)
         row = layout.row(align=True)
-        row.operator("re_mesh.chunk_path_list_add_item")
-        row.operator("re_mesh.chunk_path_list_remove_item")
+        row.operator("re_mesh_cm.chunk_path_list_add_item")
+        row.operator("re_mesh_cm.chunk_path_list_remove_item")
 
         # Reorder buttons
         row = layout.row(align=True)
-        row.operator("re_mesh.chunk_path_list_reorder_item", text="Move Up").direction = 'UP'
-        row.operator("re_mesh.chunk_path_list_reorder_item", text="Move Down").direction = 'DOWN'
+        row.operator("re_mesh_cm.chunk_path_list_reorder_item", text="Move Up").direction = 'UP'
+        row.operator("re_mesh_cm.chunk_path_list_reorder_item", text="Move Down").direction = 'DOWN'
 class ImportREMesh(Operator, ImportHelper):
     '''Import RE Engine Mesh File'''
     bl_idname = "re_mesh_cm.importfile"
@@ -1679,7 +1679,7 @@ if bpy.app.version >= (4, 1, 0):
     class MESH_FH_drag_import(bpy.types.FileHandler):
         bl_idname = "MESH_FH_drag_import"
         bl_label = "File handler for RE Mesh importing"
-        bl_import_operator = "re_mesh.importfile"
+        bl_import_operator = "re_mesh_cm.importfile"
         bl_file_extensions = meshExtensionsString
     
         @classmethod

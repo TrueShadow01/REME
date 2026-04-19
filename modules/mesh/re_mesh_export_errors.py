@@ -32,7 +32,7 @@ class MESH_UL_REMeshErrorList(bpy.types.UIList):
 
 class WM_OT_ShowREMeshErrorWindow(bpy.types.Operator):
 	'Show Export Errors'
-	bl_idname = 're_mesh.show_export_error_window'
+	bl_idname = 're_mesh_cm.show_export_error_window'
 	bl_label = 'RE Mesh Export Error'
 	bl_options = {'REGISTER'}
 	targetCollection : bpy.props.StringProperty()
@@ -361,4 +361,4 @@ def showREMeshErrorWindow(targetCollectionName,armatureObj,errorDict):
 	else:
 		armatureName = "None"
 	
-	bpy.ops.re_mesh.show_export_error_window('INVOKE_DEFAULT',targetCollection = targetCollectionName,armatureName = armatureName)
+	bpy.ops.re_mesh_cm.show_export_error_window('INVOKE_DEFAULT',targetCollection = targetCollectionName,armatureName = armatureName)
