@@ -220,8 +220,9 @@ class WM_OT_OpenTextureCacheFolder(Operator):
     def execute(self, context):
         try:
             openFolder(bpy.path.abspath(bpy.context.preferences.addons[__name__].preferences.textureCachePath))
-        except:
-            pass
+        except Exception as e:
+            print(f"WARNING: Failed to open texture cache folder - {str(e)}")
+            self.report({"WARNING"}, f"Could not open folder: {str(e)}")
         checkTextureCacheSize()
         return {'FINISHED'}
 
