@@ -1590,7 +1590,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 
-					elif isTransparent and hasRealAlphaTex:
+					elif isTransparent:
 						matInfo["blenderMaterial"].blend_method = "BLEND"
 
 						if bpy.app.version < (4,2,0):
