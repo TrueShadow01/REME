@@ -1596,7 +1596,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						pass
 					elif isTransparent:
 						matInfo["blenderMaterial"].blend_method = "BLEND"
-						matInfo["blenderMaterial"].shadow_method = "NONE"
+
+						if bpy.app.version < (4,2,0):
+							matInfo["blenderMaterial"].shadow_method = "NONE"
+						
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 					elif isCutout:
 						matInfo["blenderMaterial"].blend_method = "CLIP"
