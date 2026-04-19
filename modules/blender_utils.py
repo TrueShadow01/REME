@@ -82,7 +82,8 @@ def operator_exists(idname):
 	try:
 		op_as_string(idname)
 		return True
-	except:
+	except Exception as e:
+		print(f"DEBUG: operator_exists check failed for '{idname}': {str(e)}")
 		return False
 	
 #--------------------------------

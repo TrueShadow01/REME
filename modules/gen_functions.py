@@ -139,11 +139,8 @@ def setBit(bitFlag, index):
 def unsetBit(bitFlag, index):
     return bitFlag & ~(1 << index)
 def raiseError(error,errorCode = 999):
-     
-    try:
-        raise Exception()
-    except Exception:
-        print(textColors.FAIL + "ERROR: " + error + textColors.ENDC)
+    print(textColors.FAIL + "ERROR: " + error + textColors.ENDC)
+    raise Exception(error)
 
 def raiseWarning(warning):
      print(textColors.WARNING + "WARNING: " + warning + textColors.ENDC)

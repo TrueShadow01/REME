@@ -267,30 +267,32 @@ class MipData():
         #print(f"mip offset {self.mipOffset}")
         # print(f"{file.tell()}")
         mipData = None  # BytesIO for uncompressed texture data
-
-        if texVersion in GDEFLATE_VERSIONS:# or texVersion == VERSION_MHWILDS_BETA:
-            mipData = self.uncompressGdeflate(file,
-                currentImageDataHeaderOffset, imageDataOffset)
-            endSize = mipData.getbuffer().nbytes
-        else:
-            mipData = BytesIO(file.read(self.uncompressedSize))
-            endSize = self.uncompressedSize
-
-        #print(f"expected mip size: {expectedMipSize}\nactual mip size: {self.uncompressedSize}")
-        if endSize != expectedMipSize:
-            lineBytelength = self.calculateLineBytelength(formatData, width)
-            #print("sclLen: %d, lbLenL %d"%(self.scanlineLength,lineBytelength))
-            #print("expMpS: %d, actual: %d"%(expectedMipSize,endSize))
-            self.storeTrimmed(mipData, self.textureData,
-                              self.scanlineLength, lineBytelength,
-                              endSize)
-        else:
-            if mipData != None:
-                self.textureData = mipData.getvalue()
-                mipData.close()
+        try:
+            if texVersion in GDEFLATE_VERSIONS:# or texVersion == VERSION_MHWILDS_BETA:
+                mipData = self.uncompressGdeflate(file,
+                    currentImageDataHeaderOffset, imageDataOffset)
+                endSize = mipData.getbuffer().nbytes
             else:
-                self.textureData = file.read(self.uncompressedSize)
+                mipData = BytesIO(file.read(self.uncompressedSize))
+                endSize = self.uncompressedSize
 
+            #print(f"expected mip size: {expectedMipSize}\nactual mip size: {self.uncompressedSize}")
+            if endSize != expectedMipSize:
+                lineBytelength = self.calculateLineBytelength(formatData, width)
+                #print("sclLen: %d, lbLenL %d"%(self.scanlineLength,lineBytelength))
+                #print("expMpS: %d, actual: %d"%(expectedMipSize,endSize))
+                self.storeTrimmed(mipData, self.textureData,
+                                self.scanlineLength, lineBytelength,
+                                endSize)
+            else:
+                if mipData != None:
+                    self.textureData = mipData.getvalue()
+                else:
+                    self.textureData = file.read(self.uncompressedSize)
+        finally:
+            if mipData != None and hasattr(mipData, "close"):
+                mipData.close()
+        
         file.seek(currentPos)
 
     def write(self, file):

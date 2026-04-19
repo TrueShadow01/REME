@@ -15,12 +15,11 @@ def getUsedTextureNodes(propFileList):
 	propSet = set()
 	path = os.path.split(__file__)[0]
 	for file in propFileList:
-		f = open(os.path.join(path,file),"r")
-		for line in f.readlines():
-			if "matInfo[\"textureNodeDict\"][\"" in line:
-				propName = line.split("matInfo[\"textureNodeDict\"][\"")[1].split("\"]",1)[0]
-				propSet.add(propName)
-		f.close()
+		with open(os.path.join(path,file), "r") as f:
+			for line in f.readlines():
+				if "matInfo[\"textureNodeDict\"][\"" in line:
+					propName = line.split("matInfo[\"textureNodeDict\"][\"")[1].split("\"]",1)[0]
+					propSet.add(propName)
 	return propSet
 try:
 	usedTextureSet = getUsedTextureNodes(
