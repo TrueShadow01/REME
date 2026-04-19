@@ -2,7 +2,7 @@
 bl_info = {
     "name": "RE Mesh Editor (Community Maintained)",
     "author": "NSA Cloud, TrueShadow",
-    "version": (0, 67, 4),
+    "version": (0, 67, 5),
     "blender": (4, 3, 2),
     "location": "File > Import-Export",
     "description": "Import and export RE Engine Mesh files natively into Blender. No Noesis required.",
@@ -667,6 +667,14 @@ class REMeshPreferences(AddonPreferences):
         row = layout.row(align=True)
         row.operator("re_mesh_cm.chunk_path_list_reorder_item", text="Move Up").direction = 'UP'
         row.operator("re_mesh_cm.chunk_path_list_reorder_item", text="Move Down").direction = 'DOWN'
+
+        # Addon Updater UI
+        layout.separator()
+        layout.label(text = "Addon Updater", icon="PREFERENCES")
+        from . import addon_updater_ops
+        addon_updater_ops.update_notice_box_ui(self, context)
+        addon_updater_ops.update_settings_ui(self, context)
+
 class ImportREMesh(Operator, ImportHelper):
     '''Import RE Engine Mesh File'''
     bl_idname = "re_mesh_cm.importfile"
@@ -1828,7 +1836,10 @@ def register():
         bpy.utils.register_class(TEX_FH_drag_import)
         bpy.utils.register_class(FBXSKEL_FH_drag_import)
         bpy.utils.register_class(SFUR_FH_drag_import)
-        
+    
+    # Addon Updater Registration
+    from . import addon_updater_ops
+    addon_updater_ops.register(bl_info)
     
 def unregister():
     del bpy.types.WindowManager.enableModFileTracking
