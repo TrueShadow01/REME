@@ -209,8 +209,9 @@ def setModDirectoryFromFilePath(filePath):
         try:
             bpy.context.scene.re_mdf_toolpanel.modDirectory = splitNativesPath(filePath)[0]
             print(f"Set mod directory to {bpy.context.scene.re_mdf_toolpanel.modDirectory}")
-        except:
-            print("ERROR: Failed to set mod directory, exported file path probably does not follow the chunk naming scheme.")
+        except Exception as e:
+            print("ERROR: Failed to set mod directory - {str(e)}")
+            print("Exported file path probably does not follow the chunk naming schema.")
 class WM_OT_OpenTextureCacheFolder(Operator):
     bl_label = "Open Texture Cache Folder"
     bl_description = "Opens the texture cache folder in File Explorer"
