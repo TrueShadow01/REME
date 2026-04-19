@@ -138,9 +138,9 @@ def ReadCompressedPosBuffer(vertexPosBuffer,bitFlag,center,relOffset):
 		posArray[:,2] = ((packedIntArray >> 21) & 2047) / 2047
 		"""
 		#10-10-10 packing
-		posArray[:,0] = (packedIntArray & 1023)
-		posArray[:,1] = ((packedIntArray >> 10) & 1023)
-		posArray[:,2] = ((packedIntArray >> 20) & 1023)
+		posArray[:,0] = ((packedIntArray & 1023) / 1023.0)
+		posArray[:,1] = (((packedIntArray >> 10) & 1023) / 1023.0)
+		posArray[:,2] = (((packedIntArray >> 20) & 1023) / 1023.0)
 	else:
 		posArray = np.frombuffer(vertexPosBuffer,dtype="<3H")
 		posArray = posArray.astype(dtype="f")
