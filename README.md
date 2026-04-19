@@ -8,7 +8,7 @@ The original projects is no longer being updated, so this fork continues develop
 ---
 
 ## Changes in this fork
-- Fixed alpha clipping causing holes in solid materials
+- Fixed alpha clipping causing holes in solid materials [IN-PROGRESS]
 - Improved compatiblity with newer games (e.g. PRAGMATA)
 - Better handling of alpha maps (prevents unintended transparency) (NOT TESTED ON ALL GAMES)
 
