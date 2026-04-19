@@ -1413,11 +1413,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 								matInfo["roughnessNodeLayerGroup"].addMixLayer(currentMaskNode.outputs["Alpha"],factorOutSocket = None,mixType = "MIX",mixFactor = 1.0)
 				#Finish process by linking to bsdf shader
 				
-				if matInfo["alphaSocket"] is None and "ATOCorASOC" in matInfo["textureNodeDict"]:
-					atosNode = matInfo["textureNodeDict"]["ATOCorASOC"]
-
-					matInfo["alphaSocket"] = atosNode.outputs["Alpha"]
-				
 				if matInfo["cavityNodeLayerGroup"].currentOutSocket != None:#Add cavity layers into AO
 					matInfo["aoNodeLayerGroup"].addMixLayer(matInfo["cavityNodeLayerGroup"].currentOutSocket,factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 0.6)
 				
@@ -1573,11 +1568,13 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					
 				
 				alphaClippingNode = None
-				#if hasAlpha:
 				if matInfo["alphaSocket"] is not None:
-
 					mmtr = matInfo["mmtrName"].lower()
 					shaderType = matInfo["shaderType"]
+
+					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
+
+					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in ["BaseAlphaMap" ,"AlphaMap"])
 
 					isTransparent = (
 						matInfo["isAlphaBlend"] or
@@ -1585,30 +1582,22 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						any(x in mmtr for x in ["glass", "decal", "transparent"])
 					)
 
-					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "cap"])
+					if not hasRealAlphaTex and not isCutout and not isTransparent:
+						matInfo["alphaSocket"] = None
+					elif isCutout:
+						matInfo["blenderMaterial"].blend_method = "CLIP"
+						matInfo["blenderMaterial"].alpha_threshold = 0.5
+						
+						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 
-					usesAlphaAsMask = (
-						matInfo["isMaskAlphaMMTR"]
-					)
-
-					if usesAlphaAsMask:
-						pass
-					elif isTransparent:
-						print(bpy.app.version < (4,2,0))
+					elif isTransparent and hasRealAlphaTex:
 						matInfo["blenderMaterial"].blend_method = "BLEND"
 
 						if bpy.app.version < (4,2,0):
 							matInfo["blenderMaterial"].shadow_method = "NONE"
 						
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-					elif isCutout:
-						matInfo["blenderMaterial"].blend_method = "CLIP"
-						matInfo["blenderMaterial"].alpha_threshold = 0.5
 
-						if bpy.app.version < (4, 2, 0):
-							matInfo["blenderMaterial"].shadow_method = "CLIP"
-						
-						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 					else:
 						matInfo["blenderMaterial"].blend_method = "HASHED"
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
