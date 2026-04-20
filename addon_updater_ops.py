@@ -340,10 +340,9 @@ class AddonUpdaterUpdateTarget(bpy.types.Operator):
     def target_version(self, context):
         # In case of error importing updater.
         if updater.invalid_updater:
-            ret = []
+            return []
 
         ret = []
-        i = 0
         for tag in updater.tags:
             ret.append((tag, tag, "Select to install " + tag))
             i += 1
