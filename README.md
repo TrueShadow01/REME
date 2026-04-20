@@ -3,42 +3,55 @@
 This is a maintained fork of the [original RE Mesh Editor Plugin by NSACloud.](https://github.com/NSACloud/RE-Mesh-Editor)
 
 The original projects is no longer being updated, so this fork continues development, fixes bugs and improves the combatibility with newer RE Engine titles. 
-# I am currently only working on PRAGMATA Support.
 
 ---
 
 ## Changes in this fork
-- Fixed alpha clipping causing holes in solid materials [IN-PROGRESS]
+- Fixed alpha clipping causing holes in solid materials
 - Improved compatiblity with newer games (e.g. PRAGMATA)
-- Better handling of alpha maps (prevents unintended transparency) (NOT TESTED ON ALL GAMES)
+- Better handling of alpha maps (prevents unintended transparency)
 
-More updates coming soon.
+**More updates coming soon. See the Roadmap below for a rough overview of future updates.**
 
-# Roadmap
-### Short-Term
-- Fix material accuracy issues
-  - Improve alpha handling (transparency vs data maps like ATOS / BaseAlphaMap)
-  - Correct UV mapping for special materials (e.g. hair, eyebrows, decals)
-- Resolve texture misalignment in complex shaders (HairOverMap, detail maps)
-- Ensure consistency between original addon and forked version behaviour
+## Roadmap
 
-### Mid-Term
-- Implement smarter shader detection
-  - Automatically detect when materials require UV1 instead of UV0
-  - Improve handling of hair, skin and eye materials
-- Refactor material pipelines
-  - Reduce hardcoded cases
+### Current Priority: PRAGMATA Support
+- [IN-PROGRESS] Validate and improve material node accuracy for PRAGMATA assets
+- [IN-PROGRESS] Test texture format handling with PRAGMATA-specific compression
+
+### Material and Shader Fixes
+- **[IN-PROGRESS] Material Accuracy**
+  - Improve alpha map handling (distinguish transparency vs data maps like ATOS/BaseAlphaMap)
+  - Fix UV mapping for specialized materials (hair, eyebrows, decals)
+  - Resolve texture misalignment in complex shaders (HairOverMap, detail maps)
+
+- **[IN-PROGRESS] Shader Detection & Generation**
+  - Automatically detect when materials require UV1 vs UV0
+  - Reduce hardcoded shader cases
   - Make node generation more modular and predictable
-- Improve compatibility with newer RE Engine titles (RE9, MHWILDS, etc.)
 
-### Long-Term
-- Achieve near 1:1 visual parity with in-game materials
-- Support more advanced shader features:
-  - Proper transluceny handling
-  - Better subsurface scattering (SSS)
-  - Accurate hair shading
-- Optimize import performance and reduce redundant texture processing
-- Clean up and document the codebase for easier contributions
+- **[IN-PROGRESS] Material Consistency**
+  - Ensure forked version matches original addon behavior
+  - Improve hair, skin, and eye material handling
+
+### Code Quality & Maintainability
+- [IN-PROGRESS] Refactor material pipelines for better modularity
+- [IN-PROGRESS] Clean up and document codebase for community contributions
+- [IN-PROGRESS] Reduce redundant texture processing and optimize import performance
+
+### Game Compatibility
+- [IN-PROGRESS] Improve support for RE9 and MHWILDS
+- [IN-PROGRESS] Validate against RE2, RE3, RE4, RE7RT presets
+- [IN-PROGRESS] Test with newly discovered RE Engine asset variations
+
+### Advanced Features (Future)
+- [IN-PROGRESS] Advanced shader support (proper translucency, subsurface scattering)
+- [IN-PROGRESS] Accurate hair shading
+- [IN-PROGRESS] Near 1:1 visual parity with in-game materials
+
+---
+
+**Contributing**: If you're interested in tackling any of these areas, open an issue or PR.
 
 # Requirements
 - Blender 4.3.2 or higher
