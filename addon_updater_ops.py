@@ -1102,7 +1102,7 @@ def update_settings_ui(self, context, element=None):
     if updater.error is not None and updater.error_msg is not None:
         row.label(text=updater.error_msg)
     elif last_check:
-        dot_index = last_check[0: last_check.find(".")]
+        dot_index = last_check.find(".")
         if dot_index != -1:
             last_check = last_check[0: dot_index]
         row.label(text="Last update check: " + last_check)
@@ -1228,7 +1228,7 @@ def update_settings_ui_condensed(self, context, element=None):
     if updater.error is not None and updater.error_msg is not None:
         row.label(text=updater.error_msg)
     elif last_check != "" and last_check is not None:
-        dot_index = last_check[0: last_check.find(".")]
+        dot_index = last_check.find(".")
         if dot_index != -1:
             last_check = last_check[0: dot_index]
         row.label(text="Last check: " + last_check)
