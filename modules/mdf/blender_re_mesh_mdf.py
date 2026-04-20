@@ -647,7 +647,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					
 			for (_,textureType,imageList,texturePath) in textureNodeInfoList:
 				try:
-					newNode = addImageNode(blenderMaterial.node_tree,textureType,imageList,texturePath,(currentXPos,currentYPos))
+					newNode = addImageNode(blenderMaterial.node_tree,textureType,imageList,texturePath,(currentXPos,currentYPos),matInfo["mmtrName"])
 					currentYPos += 350
 					#print(newNode)
 	
@@ -838,6 +838,22 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						#Use secondary uv on base alpha texture if it's enabled on the layer mask
 						#TODO Check this in game, there's a mesh that uses secondary uv but doesn't have base secondary uv flag enabled: "RE4_EXTRACT\re_chunk_000\natives\STM\_Chainsaw\Environment\sm\sm2X\sm21\sm21_515\sm21_515_00.mesh.221108797"
 						links.new(layerMaskUVMappingGroupNode.outputs["Vector"],nodeTree.nodes["BaseAlphaMap"].inputs["Vector"])
+				
+				# Ensure BaseAlphaMap gets UV mapping even when LayerMaskOcclusionMap doesn't exist
+				if "BaseAlphaMap" in nodeTree.nodes and "LayerMaskOcclusionMap" not in matInfo["textureNodeDict"]:
+					# Check if this is a hair material that should use secondary UV
+					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
+					
+					baseAlphaUVMappingNode = getDualUVMappingNodeGroup(nodeTree)
+					baseAlphaUVMappingNode.location = nodeTree.nodes["BaseAlphaMap"].location + Vector((-300,0))
+					nodeTree.links.new(UVMap1Node.outputs["UV"],baseAlphaUVMappingNode.inputs["UV1"])
+					nodeTree.links.new(UVMap2Node.outputs["UV"],baseAlphaUVMappingNode.inputs["UV2"])
+					
+					# Use secondary UV for hair/eyelash/eyebrow materials
+					if isCutout:
+						baseAlphaUVMappingNode.inputs["UseSecondaryUV"].default_value = 1.0
+					
+					links.new(baseAlphaUVMappingNode.outputs["Vector"],nodeTree.nodes["BaseAlphaMap"].inputs["Vector"])
 					layer1UVMappingGroupNode = None
 					layer2UVMappingGroupNode = None
 					if "UV_Tiling1" in matInfo["mPropDict"]:

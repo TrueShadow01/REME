@@ -725,7 +725,7 @@ missingTexTypeDict = {
 	"OCMA":(1.0,1.0,1.0,1.0),
 	}
 MAX_ARRAY_IMPORT_SIZE = 16#Blender can't handle much more than 16 mix nodes into a color node, so it gets treated as a single image node if it exceeds 16
-def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos):
+def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos,mmtrName=""):
 	#print(f"Loading {texturePath}")
 	#print(len(imageList))
 	colorSpace = "sRGB" if textureType in albedoTypeSet or "alb" in texturePath.rsplit("_",1)[-1].lower() else "Non-Color"
@@ -738,6 +738,9 @@ def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos):
 
 		isHair = False
 		if "hair" in textureType.lower():
+			isHair = True
+		# Also check if the material is a hair material
+		elif "hair" in mmtrName.lower() or "lash" in mmtrName.lower() or "brow" in mmtrName.lower() or "beard" in mmtrName.lower() or "cap" in mmtrName.lower() or "fur" in mmtrName.lower() or "feather" in mmtrName.lower():
 			isHair = True
 		
 		uvMapName = "UVMap0"
