@@ -60,10 +60,15 @@ props_RoughnessOverrideSet = set([
 albedoTypeSet = set([
 	"ALBD",
 	"ALBDmap",
+	"AlbedoMap",
 	"BackMap",
 	"BaseMap",
 	"BackMap_1",
 	"BaseAlphaMap",
+	"BaseColor",
+	"BaseColorAlphaMap",
+	"BaseColorMap",
+	"BaseColorTexture",
 	"BaseMetalMap",
 	"BaseMetalMapArray",
 	"BaseShiftMap",
@@ -71,15 +76,33 @@ albedoTypeSet = set([
 	#"BaseDielectricMapBase",
 	"BaseAlphaMap",
 	"BaseDielectricMap",
+	"BaseDielectricMap1",
+	"BaseDielectricMap2",
+	"BaseDielectricMapArray",
+	"BaseDielectricMapBase",
 	#Vertex Color
 	#"BaseDielectricMap_B",
 	#"BaseDielectricMap_G",
 	#"BaseDielectricMap_R",
 	"BaseMap",
+	"ColorMap",
+	"DetailAlbedoMap",
+	"DetailAlbedoMap2",
 	#"CloudMap",
 	"CloudMap_1",
 	"FaceBaseMap",
 	"Face_BaseDielectricMap",
+	"FlowMap_ColorMap",
+	"FoamColorMap",
+	"Fur_DepthColorMap",
+	"PatternColorMap",
+	"PupilColorMap",
+	"Rec_Mucus_BaseColor",
+	"SecondaryAlbedoMap",
+	"SecondaryBaseColorMap",
+	"Tex_BaseColor",
+	"WaterColorMap",
+	"WaveColorMap",
 	"Moon_Tex",
 	"Sky_Top_Tex",
 	"RTReflectionBaseMap",
@@ -115,7 +138,12 @@ normalTypeSet = set([
 	])
 
 alphaTypeSet = set([
-	"AlphaMap"
+	"AdditionalAlphaMap",
+	"Alpha",
+	"AlphaMap",
+	"AlphaMaskMap",
+	"AlphaMaskTex",
+	"AlphaTex",
 
 	])
 cmmTypeSet = set([
@@ -382,6 +410,7 @@ texVersionDict = {
 	20:".31",
 	#21":".34",#Commented out so RE7RT streaming textures will be found
 	23:".28",
+	31:".241101895",
 	32:".143221013",
 	#40:".760230703",
 	45:".241106027",
@@ -455,7 +484,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		mdfMaterial = mdfMaterialDict.get(materialName,None)
 		textureNodeInfoList = []
 		if mdfMaterial != None:
-			hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable or mdfMaterial.flags.flagValues.AlphaMaskUsed
+			hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable
+			if mdfVersion < 31:
+				hasAlpha = hasAlpha or mdfMaterial.flags.flagValues.AlphaMaskUsed
+			if mdfVersion >= 31:
+				hasAlpha = hasAlpha or mdfMaterial.flagsB.flagValues.AlphaUsed
 			if mdfMaterial.ver32Unkn0 == 1:
 				hasAlpha = True
 			hasVertexColor = False
@@ -507,11 +540,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if textureType in albedoVertexColorTypeSet or textureType in normalVertexColorTypeSet:
 						hasVertexColor = True
 					if textureType in albedoTypeSet:
-						if textureType == "BaseDielectricMap" or textureType == "BaseDielectricMapBase":
+						if textureType in ("BaseDielectricMap", "BaseDielectricMap1", "BaseDielectricMap2", "BaseDielectricMapArray", "BaseDielectricMapBase", "SecondaryAlbedoMap"):
 							textureNodeInfoList.append(("ALBD",textureType,imageList,outputPath))
 						elif textureType == "BaseMetalMap" or textureType == "BaseMetalMapArray":
 							textureNodeInfoList.append(("ALBM",textureType,imageList,outputPath))
-						elif textureType == "BaseAlphaMap":
+						elif textureType in ("BaseAlphaMap", "BaseColorAlphaMap", "DetailAlbedoMap", "PupilColorMap", "Tex_BaseColor"):
 							textureNodeInfoList.append(("ALBA",textureType,imageList,outputPath))
 							
 							#hasAlpha = True
@@ -585,6 +618,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			matInfo = {
 				"mmtrName":os.path.split(mdfMaterial.mmtrPath.lower())[1],
 				"flags":mdfMaterial.flags.flagValues,
+				"flagsB":mdfMaterial.flagsB.flagValues,
 				"textureNodeDict":{},
 				"mPropDict":mdfMaterial.getPropertyDict(),
 				"currentPropPos":currentPropPos,
@@ -842,7 +876,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				# Ensure BaseAlphaMap gets UV mapping even when LayerMaskOcclusionMap doesn't exist
 				if "BaseAlphaMap" in nodeTree.nodes and "LayerMaskOcclusionMap" not in matInfo["textureNodeDict"]:
 					# Check if this is a hair material that should use secondary UV
-					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
+					isCutout = any(x in matInfo["mmtrName"] for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
 					
 					baseAlphaUVMappingNode = getDualUVMappingNodeGroup(nodeTree)
 					baseAlphaUVMappingNode.location = nodeTree.nodes["BaseAlphaMap"].location + Vector((-300,0))
@@ -854,6 +888,9 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						baseAlphaUVMappingNode.inputs["UseSecondaryUV"].default_value = 1.0
 					
 					links.new(baseAlphaUVMappingNode.outputs["Vector"],nodeTree.nodes["BaseAlphaMap"].inputs["Vector"])
+					LYMOSepNode = nodes.new("ShaderNodeSeparateColor")
+					LYMOSepNode.location = nodeTree.nodes["BaseAlphaMap"].location + Vector((300,0))
+					links.new(nodeTree.nodes["BaseAlphaMap"].outputs["Color"],LYMOSepNode.inputs["Color"])
 					layer1UVMappingGroupNode = None
 					layer2UVMappingGroupNode = None
 					if "UV_Tiling1" in matInfo["mPropDict"]:
@@ -1589,15 +1626,17 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 
 					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
 
-					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in ["BaseAlphaMap" ,"AlphaMap"])
+					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in alphaTypeSet) or any(tex in matInfo["textureNodeDict"] for tex in ["BaseAlphaMap", "BaseColorAlphaMap", "Tex_BaseColor"])
+					hasAlphaFlag = bool(hasAlpha)
 
 					isTransparent = (
 						matInfo["isAlphaBlend"] or
 						shaderType in alphaBlendShaderTypes or
+						hasAlphaFlag or
 						any(x in mmtr for x in ["glass", "decal", "transparent"])
 					)
 
-					if not hasRealAlphaTex and not isCutout and not isTransparent:
+					if not hasAlphaFlag and not hasRealAlphaTex and not isCutout and not isTransparent:
 						matInfo["alphaSocket"] = None
 					elif isCutout:
 						matInfo["blenderMaterial"].blend_method = "CLIP"

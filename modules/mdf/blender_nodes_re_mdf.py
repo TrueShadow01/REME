@@ -749,7 +749,7 @@ def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos,mmtrName=
 		
 		uvNodeName = f"{uvMapName}Node"
 
-		if uvMapName in nodeTree.nodes:
+		if uvNodeName in nodeTree.nodes:
 			uvNode = nodeTree.nodes[uvNodeName]
 		else:
 			uvNode = nodeTree.nodes.new("ShaderNodeUVMap")
@@ -1379,10 +1379,17 @@ def newATOSNode (nodeTree,textureType,matInfo):
 			nodeTree.links.new(alphaUV2Node.outputs["Value"],mixUVAlphaNode.inputs["Fac"])
 			currentPos[0] += 300
 			if not isMTOS and not isMaskAlpha:
-				matInfo["alphaSocket"] = mixUVAlphaNode.outputs["Color"]
+				# Prefer real image alpha channel if available, otherwise use mixed red channel
+				if hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+					matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
+				else:
+					matInfo["alphaSocket"] = mixUVAlphaNode.outputs["Color"]
 		else:
 			if not isMTOS and not isMaskAlpha:
-				matInfo["alphaSocket"] = separateNode.outputs["Red"]
+				if hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+					matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
+				else:
+					matInfo["alphaSocket"] = separateNode.outputs["Red"]
 		
 		if occlusionUV2Node != None or useLegacyHairUV2Occlusion:
 			mixUVOCCNode = nodeTree.nodes.new('ShaderNodeMixRGB')
@@ -1413,7 +1420,10 @@ def newATOSNode (nodeTree,textureType,matInfo):
 				matInfo["cavityNodeLayerGroup"].addMixLayer(imageNode.outputs["Alpha"])
 	else:
 		if not isMTOS and not isMaskAlpha and not "StitchMap" in matInfo["textureNodeDict"]:
-			matInfo["alphaSocket"] = separateNode.outputs["Red"]
+			if hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+				matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
+			else:
+				matInfo["alphaSocket"] = separateNode.outputs["Red"]
 		matInfo["translucentSocket"] = separateNode.outputs["Green"]
 		if matInfo["gameName"] != "SF6" and not useLegacyHairUV2Occlusion:#SF6 uses occlusion channel for something else
 			matInfo["aoNodeLayerGroup"].addMixLayer(separateNode.outputs["Blue"])
@@ -1497,7 +1507,42 @@ def newUNKNNode (nodeTree,textureType,matInfo):
 		imageNode.image.colorspace_settings.name = "sRGB"
 	else:
 		imageNode.image.colorspace_settings.name = "Non-Color"
-	imageNode.image.alpha_mode = "CHANNEL_PACKED"
+	# Auto-detect premultiplied vs straight alpha when possible
+	try:
+		img = imageNode.image
+		if img is not None:
+			try:
+				if getattr(img, "channels", 0) >= 4:
+					total_pixels = (img.size[0] * img.size[1]) if hasattr(img, "size") else 0
+					if total_pixels > 0:
+						sample_count = min(1000, total_pixels)
+						pixels = list(img.pixels)
+						step = max(1, total_pixels // sample_count)
+						has_alpha = 0
+						premul_votes = 0
+						straight_votes = 0
+						for i in range(0, total_pixels, step):
+							idx = i * img.channels
+							r = pixels[idx]
+							g = pixels[idx+1]
+							b = pixels[idx+2]
+							a = pixels[idx+3]
+							if a < 0.99:
+								has_alpha += 1
+								if r > a + 0.01 or g > a + 0.01 or b > a + 0.01:
+									straight_votes += 1
+								else:
+									premul_votes += 1
+						if has_alpha > 0:
+							img.alpha_mode = "STRAIGHT" if straight_votes >= premul_votes else "PREMUL"
+						else:
+							img.alpha_mode = "STRAIGHT"
+					else:
+						img.alpha_mode = "STRAIGHT"
+			except Exception:
+				img.alpha_mode = "CHANNEL_PACKED"
+	except Exception:
+		imageNode.image.alpha_mode = "CHANNEL_PACKED"
 	imageNode.location = currentPos
 	return imageNode
 """
