@@ -260,9 +260,40 @@ from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,getMHWildsDetailMapNodeGroup
 from ..ddsconv.directx.texconv import Texconv, unload_texconv
 DEBUG_MODE = False
+DEBUG_ALPHA_DIAGNOSTICS = True
 def debugprint(string):
 	if DEBUG_MODE:
 		print(string)
+
+def getSocketDebugName(socket):
+	if socket == None:
+		return "None"
+	try:
+		return f"{socket.node.name}.{socket.name}"
+	except:
+		return str(socket)
+
+def alphaDebugPrint(materialName, matInfo, hasAlpha, hasAlphaFlagB, alphaDecision, hasRealAlphaTex, isCutout, isTransparent):
+	if DEBUG_ALPHA_DIAGNOSTICS:
+		textureNames = sorted(list(matInfo["textureNodeDict"].keys()))
+		alphaProps = sorted([propName for propName in matInfo["mPropDict"].keys() if "alpha" in propName.lower() or propName in {"Transparent", "TearBlendRate", "DisappearanceRate"}])
+		print(
+			"[MDF Alpha] "
+			f"mat={materialName} "
+			f"game={matInfo['gameName']} "
+			f"mmtr={matInfo['mmtrName']} "
+			f"shader={matInfo['shaderType']} "
+			f"flagsAlpha={bool(hasAlpha)} "
+			f"flagsBAlphaUsed={bool(hasAlphaFlagB)} "
+			f"realAlphaTex={hasRealAlphaTex} "
+			f"cutout={isCutout} "
+			f"transparent={isTransparent} "
+			f"alphaSocket={getSocketDebugName(matInfo['alphaSocket'])} "
+			f"decision={alphaDecision} "
+			f"blend={matInfo['blenderMaterial'].blend_method} "
+			f"textures={textureNames} "
+			f"alphaProps={alphaProps}"
+		)
 
 ADDON_NAME = __package__.split(".")[0]
 def getChunkPathList(gameName):
@@ -487,8 +518,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable
 			if mdfVersion < 31:
 				hasAlpha = hasAlpha or mdfMaterial.flags.flagValues.AlphaMaskUsed
+			hasAlphaFlagB = False
 			if mdfVersion >= 31:
-				hasAlpha = hasAlpha or mdfMaterial.flagsB.flagValues.AlphaUsed
+				try:
+					hasAlphaFlagB = mdfMaterial.flagsB.flagValues.AlphaUsed
+				except:
+					hasAlphaFlagB = False
 			if mdfMaterial.ver32Unkn0 == 1:
 				hasAlpha = True
 			hasVertexColor = False
@@ -1620,6 +1655,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					
 				
 				alphaClippingNode = None
+				alphaDecision = "NO_ALPHA_SOCKET"
+				hasRealAlphaTex = False
+				isCutout = False
+				isTransparent = False
 				if matInfo["alphaSocket"] is not None:
 					mmtr = matInfo["mmtrName"].lower()
 					shaderType = matInfo["shaderType"]
@@ -1629,23 +1668,26 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in alphaTypeSet) or any(tex in matInfo["textureNodeDict"] for tex in ["BaseAlphaMap", "BaseColorAlphaMap", "Tex_BaseColor"])
 					hasAlphaFlag = bool(hasAlpha)
 
+					isAlphaTested = hasAlphaFlag
 					isTransparent = (
 						matInfo["isAlphaBlend"] or
 						shaderType in alphaBlendShaderTypes or
-						hasAlphaFlag or
 						any(x in mmtr for x in ["glass", "decal", "transparent"])
 					)
 
 					if not hasAlphaFlag and not hasRealAlphaTex and not isCutout and not isTransparent:
 						matInfo["alphaSocket"] = None
-					elif isCutout:
+						alphaDecision = "IGNORED_ALPHA_SOCKET"
+					elif isCutout or isAlphaTested:
 						matInfo["blenderMaterial"].blend_method = "CLIP"
 						matInfo["blenderMaterial"].alpha_threshold = 0.5
+						alphaDecision = "CLIP"
 						
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 
 					elif isTransparent:
 						matInfo["blenderMaterial"].blend_method = "BLEND"
+						alphaDecision = "BLEND"
 
 						if bpy.app.version < (4,2,0):
 							matInfo["blenderMaterial"].shadow_method = "NONE"
@@ -1654,7 +1696,15 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 
 					else:
 						matInfo["blenderMaterial"].blend_method = "HASHED"
+						alphaDecision = "HASHED"
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+				
+				if DEBUG_ALPHA_DIAGNOSTICS:
+					alphaTextureNames = alphaTypeSet.union({"BaseAlphaMap", "BaseColorAlphaMap", "Tex_BaseColor", "AlphaTranslucentOcclusionCavityMap", "AlphaTranslucentOcclusionSSSMap", "AlphaCavityOcclusionTranslucentMap", "NormalRoughnessAlphaMap", "StitchMap"})
+					hasAlphaTextureName = any(tex in matInfo["textureNodeDict"] for tex in alphaTextureNames)
+					hasAlphaPropertyName = any("alpha" in propName.lower() or propName in {"Transparent", "TearBlendRate", "DisappearanceRate"} for propName in matInfo["mPropDict"].keys())
+					if matInfo["alphaSocket"] is not None or hasAlpha or hasAlphaFlagB or hasAlphaTextureName or hasAlphaPropertyName or matInfo["isAlphaBlend"]:
+						alphaDebugPrint(materialName, matInfo, hasAlpha, hasAlphaFlagB, alphaDecision, hasRealAlphaTex, isCutout, isTransparent)
 				
 				if matInfo["sheenSocket"] != None:
 					if bpy.app.version < (4,0,0):
