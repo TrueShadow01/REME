@@ -4,6 +4,8 @@ This is a maintained fork of the [original RE Mesh Editor Plugin by NSACloud.](h
 
 The original projects is no longer being updated, so this fork continues development, fixes bugs and improves the combatibility with newer RE Engine titles. 
 
+Note: This project is not affiliated with any third-party forums or communities reposting it.
+
 ---
 
 ## Changes in this fork
