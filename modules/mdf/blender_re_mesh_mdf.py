@@ -1208,8 +1208,17 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				if "eye" in matInfo["blenderMaterial"].name or "eye" in matInfo["mmtrName"] or matInfo["mmtrName"].endswith("_ao.mmtr"):
 					#Tearline mat setup
 					if "FakeSpecular" in matInfo["textureNodeDict"]:
-							matInfo["alphaSocket"] = nodes["FakeSpecular"].outputs["Color"]#RE9 TODO Figure out eye shell rendering properly
-							
+						if matInfo["gameName"] == "RE9":
+							eyeShellAlphaNode = nodes.new("ShaderNodeMath")
+							eyeShellAlphaNode.label = "RE9 Eye Shell Alpha"
+							eyeShellAlphaNode.operation = "GREATER_THAN"
+							eyeShellAlphaNode.location = nodes["FakeSpecular"].location + Vector((300, -200))
+							eyeShellAlphaNode.inputs[1].default_value = 0.5
+							links.new(nodes["FakeSpecular"].outputs["Color"], eyeShellAlphaNode.inputs[0])
+							matInfo["alphaSocket"] = eyeShellAlphaNode.outputs["Value"]
+							matInfo["isAlphaBlend"] = True
+						else:
+							matInfo["alphaSocket"] = nodes["FakeSpecular"].outputs["Color"]
 					if "TearColor" in matInfo["mPropDict"]:  
 						baseColorNode = addPropertyNode(matInfo["mPropDict"]["TearColor"], matInfo["currentPropPos"], nodeTree)
 						matInfo["albedoNodeLayerGroup"].addMixLayer(baseColorNode.outputs["Color"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
