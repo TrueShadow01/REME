@@ -1247,6 +1247,23 @@ def exportREMeshFile(filePath,options):
     remapDict = dict()
     boneVertDict = dict()
     shapeKeyBoneSet = set()#DD2 secondary weights
+
+    # Pre-scan all LODs and meshes to gather every weighted bone used across the entire model
+    if armatureObj != None:
+        armatureBoneDict = armatureObj.data.bones
+        for lod in meshLODCollectionList:
+            for obj in lod.objects:
+                if obj.type == "MESH" and not obj.get("MeshExportExclude"):
+                    if options["selectedOnly"] and obj not in bpy.context.selected_objects:
+                        continue
+                    # Scan vertex groups that actually have weights
+                    eval_mesh = obj.evaluated_get(dg).data
+                    for vg in obj.vertex_groups:
+                        vgName = vg.name.removeprefix("SHAPEKEY_")
+                        if vgName in armatureBoneDict:
+                            if any(vg.index in [g.group for g in v.groups] for v in eval_mesh.vertices):
+                                weightedBonesSet.add(vgName)
+
     for lodIndex, lod in enumerate(meshLODCollectionList):
         print(f"LOD {lodIndex} collection:{lod.name}")
         parsedLODLevel = LODLevel()
@@ -1307,27 +1324,13 @@ def exportREMeshFile(filePath,options):
                 else:
                     armatureBoneDict = dict()
                 
-                if isFirstLOD:
-                    hasWeights = False
-                    for vg in obj.vertex_groups:#If weight is applied to any vertex groups, add them to weighted bone set
-                        
-                        if vg.name.startswith("SHAPEKEY_"):
-                            
-                            vgName = vg.name.split("SHAPEKEY_")[1]
-                            shapeKeyBoneSet.add(vgName)
-                        else:
-                            vgName = vg.name
-                        if any(vg.index in [g.group for g in v.groups] for v in cloneObj.data.vertices) and vgName in armatureBoneDict:
-                            weightedBonesSet.add(vgName)
-                            hasWeights = True
-                        else:
-                            remapDict[vgName] = 0
-                    if armatureObj != None and not hasWeights:
-                        raiseWarning(f"No valid vertex weights found on {obj.name}!")
-                        showWarningMessage = True
-                        #addErrorToDict(errorDict, "NoWeightsOnMesh", obj.name)  
-                    if armatureObj == None and len(remapDict) != 0:
-                        addErrorToDict(errorDict, "NoArmatureInCollection", obj.name)
+                if armatureObj == None and len(obj.vertex_groups) != 0:
+                    addErrorToDict(errorDict, "NoArmatureInCollection", obj.name)
+                
+                for vg in obj.vertex_groups:
+                    if vg.name.startswith("SHAPEKEY_"):
+                        shapeKeyBoneSet.add(vg.name.split("SHAPEKEY_")[1])
+
                 if not visconDict.get(groupID):
                     visconDict[groupID] = [obj]
                 else:
@@ -1798,7 +1801,7 @@ def exportREMeshFile(filePath,options):
     meshWriteStartTime = time.time()
     reMesh = ParsedREMeshToREMesh(parsedMesh, meshVersion)
     if targetCollection != None:
-        reMesh.fileHeader.lodGroupNameHash = int(targetCollection.get("LODGroupNameHash","0"))
+        reMesh.fileHeader.lodGroupNameHash = int(targetCollection.get("LODGroupNameHash","3407096719"))
     writeREMesh(reMesh, filePath)
     meshWriteEndTime = time.time()
     meshWriteExportTime =  meshWriteEndTime - meshWriteStartTime
