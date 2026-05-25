@@ -1665,7 +1665,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 
 					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
 
-					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in alphaTypeSet) or any(tex in matInfo["textureNodeDict"] for tex in ["BaseAlphaMap", "BaseColorAlphaMap", "Tex_BaseColor"])
+					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in [
+						"AlphaMap",
+						"AlphaMaskMap",
+						"AlphaMaskTex",
+						"AdditionalAlphaMap"
+					])
 					hasAlphaFlag = bool(hasAlpha)
 
 					isAlphaTested = hasAlphaFlag
@@ -1673,7 +1678,24 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						matInfo["isAlphaBlend"] or
 						shaderType in alphaBlendShaderTypes or
 						any(x in mmtr for x in ["glass", "decal", "transparent"])
-					)
+					) and matInfo["gameName"] != "SF6"
+
+					if matInfo["gameName"] == "SF6":
+						isTransparent = any (x in mmtr for x in [
+							"glass",
+							"eye",
+							"lash",
+							"hair",
+							"brow",
+							"beard"
+						])
+
+						isCutout = any(x in mmtr for x in [
+							"lash",
+							"hair",
+							"brow",
+							"beard"
+						])
 
 					if not hasAlphaFlag and not hasRealAlphaTex and not isCutout and not isTransparent:
 						matInfo["alphaSocket"] = None

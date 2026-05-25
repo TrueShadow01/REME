@@ -2012,7 +2012,9 @@ def ParsedREMeshToREMesh(parsedMesh,meshVersion):
 		for viscon in parsedMesh.mainMeshLODList[0].visconGroupList:
 			reMesh.lodHeader.totalMeshCount += len(viscon.subMeshList)
 		reMesh.lodHeader.skinWeightCount = 18
-		if version == VERSION_MHWILDS:
+		if version == VERSION_SF6:
+			reMesh.lodHeader.skinWeightCount = 9
+		elif version == VERSION_MHWILDS:
 			reMesh.lodHeader.skinWeightCount = 25#Not sure why but this fixes monsters causing crashes and dead hitbox issues
 		elif version == VERSION_PRAGDEMO:
 			reMesh.lodHeader.skinWeightCount = 27#
@@ -2378,7 +2380,8 @@ def ParsedREMeshToREMesh(parsedMesh,meshVersion):
 	
 		
 	if version >= VERSION_SF6:
-		reMesh.fileHeader.sf6UnknCount = 84
+		#reMesh.fileHeader.sf6UnknCount = 84
+		reMesh.fileHeader.sf6UnknCount = 6 if version == VERSION_SF6 else 84
 		reMesh.meshBufferHeader.vertexElementSize = 27104
 		reMesh.fileHeader.verticesOffset = reMesh.meshBufferHeader.vertexBufferOffset
 		reMesh.fileHeader.streamingInfoOffset =  reMesh.fileHeader.meshOffset + sd.VERTEX_ELEMENT_OFFSET - 16
@@ -2387,11 +2390,6 @@ def ParsedREMeshToREMesh(parsedMesh,meshVersion):
 		reMesh.meshBufferHeader.totalBufferSize = getPaddedPos(reMesh.meshBufferHeader.block2FaceBufferOffset,16)
 		unknFlag16 = True
 		unknFlag10 = True
-	
-	if version == VERSION_SF6:
-		reMesh.fileHeader.sf6UnknCount = 6
-		reMesh.fileHeader.lodGroupNameHash = int(targetCollection.get("LODGroupNameHash","3407096719")) #3407096719	
-	
 	
 	currentOffset = getPaddedPos(reMesh.meshBufferHeader.faceBufferOffset + reMesh.meshBufferHeader.faceBufferSize,16)
 	if version >= VERSION_DD2:	

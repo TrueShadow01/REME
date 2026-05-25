@@ -18,7 +18,7 @@ SIX_WEIGHT_MESH_VERSIONS = frozenset([
 	#VERSION_PRAGDEMO,
 	])
 
-typeNameMapping = ["Position","NorTan","UV","UV2","Weight","Color","SF6UnknownVertexDataType","ExtraWeight"]
+typeNameMapping = ["Position","NorTan","UV","UV2","Weight","Color", "SF6UnknownVertexDataType", "SecondaryWeight","ExtraWeight"]
 typeStrideDict = {
 	"Position":12,
 	"NorTan":8,
@@ -26,6 +26,7 @@ typeStrideDict = {
 	"UV2":4,
 	"Weight":16,
 	"Color":4,
+	"SecondaryWeight":8,
 	"ExtraWeight":16,
 	}
 
@@ -166,7 +167,8 @@ BufferReadDict = {
 	"UV2":ReadUVBuffer,
 	"Weight":ReadWeightBuffer,
 	"Color":ReadColorBuffer,
-	"SF6UnknownVertexDataType":ReadColorBuffer,#Read as color data for now until what it is can be determined
+	"SF6UnknownVertexDataType": lambda buf, tags: None,
+	"SecondaryWeight":ReadWeightBuffer,
 	"ExtraWeight":ReadWeightBuffer,
 	}
 
@@ -530,47 +532,47 @@ def debug_Generate010StreamingTemplate(templateLODList):
 	print("""
 typedef struct
 {
-    float x;
-    float y;
-    float z;
+	float x;
+	float y;
+	float z;
 }Position<bgcolor=0x0000FF>;
 
 typedef struct
 {
-    ubyte normal[4];
-    ubyte tangent[4];
+	ubyte normal[4];
+	ubyte tangent[4];
 }NorTan<bgcolor=0x00FF00>;
 
 typedef struct
 {
-    hfloat u;
-    hfloat v;
+	hfloat u;
+	hfloat v;
 }UV<bgcolor=0xFF0000>;
 
 typedef struct
 {
-    hfloat u;
-    hfloat v;
+	hfloat u;
+	hfloat v;
 }UV2<bgcolor=0xCC0000>;
 typedef struct
 {
-    uint64 w0:10;;
-    uint64 w1:10;
-    uint64 w2:10;
-    uint64 pad0:2;
-    uint64 w3:10;
-    uint64 w4:10;
-    uint64 w5:10;
-    uint64 pad1:2;
+	uint64 w0:10;;
+	uint64 w1:10;
+	uint64 w2:10;
+	uint64 pad0:2;
+	uint64 w3:10;
+	uint64 w4:10;
+	uint64 w5:10;
+	uint64 pad1:2;
 	ubyte indices[8];
 }Weight<bgcolor=0x00FFFF>;
 
 typedef struct
 {
-    ubyte r;
-    ubyte g;
-    ubyte b;
-    ubyte a;
+	ubyte r;
+	ubyte g;
+	ubyte b;
+	ubyte a;
 }Color<bgcolor=0xFFFF00>;
 
 	""")
@@ -619,7 +621,10 @@ class ParsedREMesh:
 		self.materialRemapList = reMesh.materialNameRemapList
 		#Parse Skeleton
 		for remapIndex in reMesh.materialNameRemapList:
-			self.materialNameList.append(reMesh.rawNameList[remapIndex])
+			if remapIndex < len(reMesh.rawNameList):
+				self.materialNameList.append(reMesh.rawNameList[remapIndex])
+			else:
+				self.materialNameList.append(f"INVALID_MATERIAL_{remapIndex}")
 		if reMesh.skeletonHeader != None:
 			self.skeleton = Skeleton()
 			self.skeleton.weightedBones = []
