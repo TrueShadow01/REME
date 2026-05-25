@@ -6,6 +6,8 @@ The original projects is no longer being updated, so this fork continues develop
 
 ---
 
+Blender 5.1 is not supported currently.
+
 ## Changes in this fork
 - Fixed alpha clipping causing holes in solid materials
 - Improved compatiblity with newer games (e.g. PRAGMATA)
