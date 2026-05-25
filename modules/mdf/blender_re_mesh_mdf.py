@@ -455,9 +455,15 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		mdfMaterial = mdfMaterialDict.get(materialName,None)
 		textureNodeInfoList = []
 		if mdfMaterial != None:
-			hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable or mdfMaterial.flags.flagValues.AlphaMaskUsed
+			isAlphaTested = bool(
+				mdfMaterial.flags.flagValues.BaseAlphaTestEnable or
+				mdfMaterial.flags.flagValues.AlphaTestEnable or
+				(mdfVersion < 31 and mdfMaterial.flags.flagValues.AlphaMaskUsed)
+			)
 			if mdfMaterial.ver32Unkn0 == 1:
-				hasAlpha = True
+				isAlphaTested = True
+			# Old Alpha Check
+			# hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable or mdfMaterial.flags.flagValues.AlphaMaskUsed
 			hasVertexColor = False
 			#Get paths/convert textures
 			#Detect albedo texture if one isn't found by the type name
@@ -1581,9 +1587,9 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						any(x in mmtr for x in ["glass", "decal", "transparent"])
 					)
 
-					if not hasRealAlphaTex and not isCutout and not isTransparent:
+					if not hasRealAlphaTex and not isCutout and not isTransparent and not isAlphaTested:
 						matInfo["alphaSocket"] = None
-					elif isCutout:
+					elif isCutout or isAlphaTested:
 						matInfo["blenderMaterial"].blend_method = "CLIP"
 						matInfo["blenderMaterial"].alpha_threshold = 0.5
 						
