@@ -23,7 +23,7 @@ class WM_OT_ConvertDDSTexFile(Operator,ImportHelper):
 	bl_idname = "re_tex.convert_tex_dds_files"
 	bl_description = "Opens a window to select textures to convert. Selected image files will be converted to .tex and tex files will be converted to dds/png (configurable in preferences).\nIf you are using Blender 4.1 or higher, you can drag .tex or .dds files into the 3D view to convert them.\nSupported File Types:\n.dds, .png, .tga, .tiff"
 	bl_options = {'REGISTER'}#Disable undo
-	filter_glob: StringProperty(default="*.png;*.dds;*.tex.*", options={'HIDDEN'})
+	filter_glob: StringProperty(default="*.png;*.tga;*.tif;*tiff;*.dds;*.tex.*", options={'HIDDEN'})
 	files : CollectionProperty(
 			name="File Path",
 			type=OperatorFileListElement,

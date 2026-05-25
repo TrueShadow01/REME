@@ -912,7 +912,7 @@ class WM_OT_ToggleModFileTracking(bpy.types.Operator):
 			return {'CANCELLED'}
 		else:
 			exePath = getSceneEXEPath()
-			if bpy.context.scene.get("modWorkspace_directory") and os.path.isfile(exePath):
+			if bpy.context.scene.get("modWorkspace_directory") and exePath is not None and os.path.isFile(exePath):
 				print("Mod File Tracker: Started.")
 				self.filePathDict = dict()
 				self.pakPathDict = dict()
