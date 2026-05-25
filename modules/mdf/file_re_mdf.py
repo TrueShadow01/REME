@@ -438,7 +438,7 @@ class Material():
 		self.textureList = []
 		for i in range(0,self.textureCount):
 			textureEntry = TextureBinding()
-			textureEntry.read(file)
+			textureEntry.read(file, version)
 			debugprint(textureEntry)
 			self.textureList.append(textureEntry)
 		"""
