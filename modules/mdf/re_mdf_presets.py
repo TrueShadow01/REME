@@ -69,7 +69,7 @@ def saveAsPreset(activeObj,presetName,gameName):
 					if value.__class__.__name__ == "IDPropertyArray":
 						value = value.to_list()
 					#print(value)	
-					propDict = {"Property Name":prop.prop_name,"Data Type":prop.data_type,"Value":value,"Padding":prop.padding}
+					propDict = {"Property Name":prop.prop_name,"Data Type":prop.data_type,"Value":value,"Padding":prop.padding,"FrontPadding":prop.frontPadding}
 					materialJSONDict["Property List"].append(propDict)
 				
 				materialJSONDict["Texture Bindings"] = []
