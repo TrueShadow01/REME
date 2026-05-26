@@ -644,9 +644,18 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			
 			nodeBSDF.location = (400,0)
 			blenderMaterial.node_tree.links.new(nodeBSDF.outputs[0],nodeMaterialOutput.inputs[0])
+
+			if "eyetear" in mdfMaterial.mmtrPath.lower():
+				blenderMaterial.blend_method = "BLEND"
+
+				try:
+					blenderMaterial.shadow_method = "NONE"
+				except:
+					pass
+
+				nodeBSDF.inputs["Alpha"].default_value = 0.0
+
 			currentYPos = 800
-			
-			
 			currentXPos = -1900
 			currentPropPos = [-2200,2000]
 			if arrangeNodes:
@@ -711,28 +720,18 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				if bpy.app.version < (4,2,0):
 					blenderMaterial.shadow_method = "NONE"
 			elif matInfo["mmtrName"] == "env_decal.mmtr":
-				matInfo["isAlphaBlend"] = True
-			
-			
-			
-					
+				matInfo["isAlphaBlend"] = True	
 			for (_,textureType,imageList,texturePath) in textureNodeInfoList:
 				try:
 					newNode = addImageNode(blenderMaterial.node_tree,textureType,imageList,texturePath,(currentXPos,currentYPos),matInfo["mmtrName"])
 					currentYPos += 350
 					#print(newNode)
-	
 					matInfo["textureNodeDict"][textureType] = newNode
-					
 					if newNode.bl_idname == "ShaderNodeGroup":
-						
 						if newNode.node_tree.name == "ImagePassThroughNodeGroup":
 							arrayImageNodeList.append(newNode.name)
-					
 				except Exception as err:
 					raiseWarning(f"Failed to create {textureType} node on {materialName}: {str(err)}")
-				
-			
 			try:
 				for (nodeType,textureType,_,_) in textureNodeInfoList:
 					#Loop through node list again once all image nodes are added
@@ -744,10 +743,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				inErrorState = True
 			
 			try:#Detect nodes for game specific setups
-				
-				
 				#WILDS
-				
 				if "SkinMap" in matInfo["textureNodeDict"] and matInfo["gameName"] == "MHWILDS":
 					skinMapNode = matInfo["textureNodeDict"]["SkinMap"]
 					
@@ -756,7 +752,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					#nodeTree.links.new(UVMap1Node.outputs["UV"],skinMappingGroupNode.inputs["UV"])
 					
 					nodeTree.links.new(skinMappingGroupNode.outputs["Vector"],skinMapNode.inputs["Vector"])
-					
 					
 					overlaySkinNode = nodes.new("ShaderNodeMixRGB")
 					overlaySkinNode.location = skinMapNode.location + Vector((300,0))
@@ -769,7 +764,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						
 						
 					#matInfo["albedoNodeLayerGroup"].addMixLayer(skinMapNode.outputs["Color"],factorOutSocket = None,mixType = "OVERLAY",mixFactor = 1.0)
-					
 				if "HairOverMap" in matInfo["textureNodeDict"]:
 					nodeTree.links.new(UVMap2Node.outputs["UV"],matInfo["textureNodeDict"]["HairOverMap"].inputs["Vector"])
 					useHairOverFactorSocket = None
@@ -781,7 +775,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						hairOverANode = addPropertyNode(matInfo["mPropDict"]["HairOverColorA"], matInfo["currentPropPos"], nodeTree)
 						
 						hairOverBNode = addPropertyNode(matInfo["mPropDict"]["HairOverColorB"], matInfo["currentPropPos"], nodeTree)
-						
 						
 						mixHairOverNode = nodes.new("ShaderNodeMixRGB")
 						mixHairOverNode.location = matInfo["textureNodeDict"]["HairOverMap"].location + Vector((300,0))
@@ -811,10 +804,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					roughnessNode = addPropertyNode(matInfo["mPropDict"]["RoughnessParam"], matInfo["currentPropPos"], nodeTree)
 					matInfo["roughnessNodeLayerGroup"].addMixLayer(roughnessNode.outputs["Value"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
 				
-				
-				
-				
-				
 				#Tiling
 				if "UV_Tiling" in matInfo["mPropDict"]:
 					uvTilingNode = addPropertyNode(matInfo["mPropDict"]["UV_Tiling"], matInfo["currentPropPos"], nodeTree)
@@ -836,8 +825,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						uvTilingLocationNode = addPropertyNode(matInfo["mPropDict"]["UV_Tiling_Offset"], matInfo["currentPropPos"], nodeTree)
 						nodeTree.links.new(uvTilingLocationNode.outputs[0],uvMappingGroupNode.inputs["OffsetX"])
 						nodeTree.links.new(uvTilingLocationNode.outputs[1],uvMappingGroupNode.inputs["OffsetY"])
-					
-					
 					
 					for textureType in baseUVTilingList:
 						if textureType in nodeTree.nodes:
@@ -886,7 +873,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					LYMOSepNode.location = LYMONode.location + Vector((300,0))
 					links.new(LYMONode.outputs["Color"],LYMOSepNode.inputs["Color"])
 					matInfo["aoNodeLayerGroup"].addMixLayer(LYMONode.outputs["Alpha"],mixType = "MULTIPLY",mixFactor = 1.0)
-					
 					
 					layerMaskUVMappingGroupNode =  getDualUVMappingNodeGroup(nodeTree)
 					layerMaskUVMappingGroupNode.location = LYMONode.location + Vector((-300,0))
@@ -1736,7 +1722,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						
 						if matInfo["gameName"] == "SF6":
 							links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-				
 				if DEBUG_ALPHA_DIAGNOSTICS:
 					alphaTextureNames = alphaTypeSet.union({"BaseAlphaMap", "BaseColorAlphaMap", "Tex_BaseColor", "AlphaTranslucentOcclusionCavityMap", "AlphaTranslucentOcclusionSSSMap", "AlphaCavityOcclusionTranslucentMap", "NormalRoughnessAlphaMap", "StitchMap"})
 					hasAlphaTextureName = any(tex in matInfo["textureNodeDict"] for tex in alphaTextureNames)
