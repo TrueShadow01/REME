@@ -1706,21 +1706,18 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 
 					elif isCutout or isAlphaTested:
+						alphaDecision = "CLIP"
 						if bpy.app.version >= (4, 2, 0):
-							matInfo["blenderMaterial"].blend_method = "BLEND"
-							threshNode = blenderMaterial.node_tree.nodes.new("ShaderNodeMath")
-							threshNode.operation = "GREATER_THAN"
-							threshNode.inputs[1].default_value = 0.5  # threshold
-							threshNode.location = nodeBSDF.location + Vector((-200, -300))
+							matInfo["blenderMaterial"].blend_method = "HASHED"
+							matInfo["blenderMaterial"].node_tree.nodes
 							if matInfo["alphaSocket"] is not None:
-								links.new(matInfo["alphaSocket"], threshNode.inputs[0])
-							links.new(threshNode.outputs["Value"], nodeBSDF.inputs["Alpha"])
+								links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 						else:
 							matInfo["blenderMaterial"].blend_method = "CLIP"
 							matInfo["blenderMaterial"].alpha_threshold = 0.5
 							if matInfo["alphaSocket"] is not None:
 								links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-						alphaDecision = "CLIP"
+						
 						print(f"[HAIR DEBUG] material={materialName} mmtr={mmtr} alphaSocket={matInfo['alphaSocket']} threshold={matInfo['blenderMaterial'].alpha_threshold}")
 					else:
 						matInfo["blenderMaterial"].blend_method = "HASHED"
