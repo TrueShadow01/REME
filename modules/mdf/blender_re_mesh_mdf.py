@@ -919,7 +919,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					nodeTree.links.new(UVMap2Node.outputs["UV"],baseAlphaUVMappingNode.inputs["UV2"])
 					
 					# Use secondary UV for hair/eyelash/eyebrow materials
-					if isCutout:
+					if isCutout and matInfo["gameName"] != "SF6":
 						baseAlphaUVMappingNode.inputs["UseSecondaryUV"].default_value = 1.0
 					
 					links.new(baseAlphaUVMappingNode.outputs["Vector"],nodeTree.nodes["BaseAlphaMap"].inputs["Vector"])
@@ -1673,7 +1673,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					])
 					hasAlphaFlag = bool(hasAlpha)
 
-					isAlphaTested = hasAlphaFlag
+					isAlphaTested = (hasAlphaFlag or isCutout)
 					isTransparent = (
 						matInfo["isAlphaBlend"] or
 						shaderType in alphaBlendShaderTypes or
@@ -1683,11 +1683,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if matInfo["gameName"] == "SF6":
 						isTransparent = any (x in mmtr for x in [
 							"glass",
-							"eye",
-							"lash",
-							"hair",
-							"brow",
-							"beard"
+							"eye"
 						])
 
 						isCutout = any(x in mmtr for x in [
@@ -1700,13 +1696,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if not hasAlphaFlag and not hasRealAlphaTex and not isCutout and not isTransparent:
 						matInfo["alphaSocket"] = None
 						alphaDecision = "IGNORED_ALPHA_SOCKET"
-					elif isCutout or isAlphaTested:
-						matInfo["blenderMaterial"].blend_method = "CLIP"
-						matInfo["blenderMaterial"].alpha_threshold = 0.5
-						alphaDecision = "CLIP"
-						
-						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-
 					elif isTransparent:
 						matInfo["blenderMaterial"].blend_method = "BLEND"
 						alphaDecision = "BLEND"
@@ -1716,10 +1705,29 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 
+					elif isCutout or isAlphaTested:
+						if bpy.app.version >= (4, 2, 0):
+							matInfo["blenderMaterial"].blend_method = "BLEND"
+							threshNode = blenderMaterial.node_tree.nodes.new("ShaderNodeMath")
+							threshNode.operation = "GREATER_THAN"
+							threshNode.inputs[1].default_value = 0.5  # threshold
+							threshNode.location = nodeBSDF.location + Vector((-200, -300))
+							if matInfo["alphaSocket"] is not None:
+								links.new(matInfo["alphaSocket"], threshNode.inputs[0])
+							links.new(threshNode.outputs["Value"], nodeBSDF.inputs["Alpha"])
+						else:
+							matInfo["blenderMaterial"].blend_method = "CLIP"
+							matInfo["blenderMaterial"].alpha_threshold = 0.5
+							if matInfo["alphaSocket"] is not None:
+								links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+						alphaDecision = "CLIP"
+						print(f"[HAIR DEBUG] material={materialName} mmtr={mmtr} alphaSocket={matInfo['alphaSocket']} threshold={matInfo['blenderMaterial'].alpha_threshold}")
 					else:
 						matInfo["blenderMaterial"].blend_method = "HASHED"
 						alphaDecision = "HASHED"
-						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+						
+						if matInfo["gameName"] == "SF6":
+							links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 				
 				if DEBUG_ALPHA_DIAGNOSTICS:
 					alphaTextureNames = alphaTypeSet.union({"BaseAlphaMap", "BaseColorAlphaMap", "Tex_BaseColor", "AlphaTranslucentOcclusionCavityMap", "AlphaTranslucentOcclusionSSSMap", "AlphaCavityOcclusionTranslucentMap", "NormalRoughnessAlphaMap", "StitchMap"})

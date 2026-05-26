@@ -733,33 +733,6 @@ def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos,mmtrName=
 	if len(imageList) == 1 or len(imageList) > MAX_ARRAY_IMPORT_SIZE:
 		imageNode = nodeTree.nodes.new('ShaderNodeTexImage')
 
-		# UV FIX BEGIN
-		uvNode = None
-
-		isHair = False
-		if "hair" in textureType.lower():
-			isHair = True
-		# Also check if the material is a hair material
-		elif "hair" in mmtrName.lower() or "lash" in mmtrName.lower() or "brow" in mmtrName.lower() or "beard" in mmtrName.lower() or "cap" in mmtrName.lower() or "fur" in mmtrName.lower() or "feather" in mmtrName.lower():
-			isHair = True
-		
-		uvMapName = "UVMap0"
-		uvNodeName = "UVMap1Node"
-		if isHair:
-			uvMapName = "UVMap1"
-			uvNodeName = "UVMap2Node"
-
-		if uvNodeName in nodeTree.nodes:
-			uvNode = nodeTree.nodes[uvNodeName]
-		else:
-			uvNode = nodeTree.nodes.new("ShaderNodeUVMap")
-			uvNode.name = uvNodeName
-			uvNode.uv_map = uvMapName
-			uvNode.location = (currentPos[0] - 300, currentPos[1] + 200)
-		
-		nodeTree.links.new(uvNode.outputs["UV"], imageNode.inputs["Vector"])
-		# UV FIX END
-
 		imageNode.name = textureType
 		imageNode.label = textureType
 		imageNode.location = currentPos
@@ -844,8 +817,18 @@ def newALBANode (nodeTree,textureType,matInfo):
 	currentPos = [imageNode.location[0]+300,imageNode.location[1]]
 	
 	matInfo["albedoNodeLayerGroup"].addMixLayer(imageNode.outputs["Color"],factorOutSocket = None,mixType = "MIX",mixFactor = 0.5)
+	isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in [
+		"hair", "lash", "brow", "beard"
+	]))
+	
+	if isSF6Hair:
+		invertNode = nodeTree.nodes.new("ShaderNodeInvert")
+		invertNode.location = (imageNode.location[0]+300, imageNode.location[1]-200)
+		nodeTree.links.new(imageNode.outputs["Alpha"], invertNode.inputs["Color"])
+		matInfo["alphaSocket"] = invertNode.outputs["Color"]
+	else:
+		matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
 
-	matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
 	return imageNode
 def newALBNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
@@ -1386,11 +1369,13 @@ def newATOSNode (nodeTree,textureType,matInfo):
 					matInfo["alphaSocket"] = mixUVAlphaNode.outputs["Color"]
 		else:
 			if not isMTOS and not isMaskAlpha:
-				if hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+				isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in ["hair", "lash", "brow", "beard"]))
+				if isSF6Hair:
+					matInfo["alphaSocket"] = separateNode.outputs["Red"]  # SF6 hair alpha is in Red channel
+				elif hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
 					matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
 				else:
 					matInfo["alphaSocket"] = separateNode.outputs["Red"]
-		
 		if occlusionUV2Node != None or useLegacyHairUV2Occlusion:
 			mixUVOCCNode = nodeTree.nodes.new('ShaderNodeMixRGB')
 			mixUVOCCNode.location = currentPos
@@ -1420,7 +1405,10 @@ def newATOSNode (nodeTree,textureType,matInfo):
 				matInfo["cavityNodeLayerGroup"].addMixLayer(imageNode.outputs["Alpha"])
 	else:
 		if not isMTOS and not isMaskAlpha and not "StitchMap" in matInfo["textureNodeDict"]:
-			if hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+			isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in ["hair", "lash", "brow", "beard"]))
+			if isSF6Hair:
+				matInfo["alphaSocket"] = separateNode.outputs["Red"]  # SF6 hair alpha is in Red channel
+			elif hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
 				matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
 			else:
 				matInfo["alphaSocket"] = separateNode.outputs["Red"]
