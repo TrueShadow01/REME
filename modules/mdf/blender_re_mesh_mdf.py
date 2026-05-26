@@ -60,10 +60,15 @@ props_RoughnessOverrideSet = set([
 albedoTypeSet = set([
 	"ALBD",
 	"ALBDmap",
+	"AlbedoMap",
 	"BackMap",
 	"BaseMap",
 	"BackMap_1",
 	"BaseAlphaMap",
+	"BaseColor",
+	"BaseColorAlphaMap",
+	"BaseColorMap",
+	"BaseColorTexture",
 	"BaseMetalMap",
 	"BaseMetalMapArray",
 	"BaseShiftMap",
@@ -71,15 +76,33 @@ albedoTypeSet = set([
 	#"BaseDielectricMapBase",
 	"BaseAlphaMap",
 	"BaseDielectricMap",
+	"BaseDielectricMap1",
+	"BaseDielectricMap2",
+	"BaseDielectricMapArray",
+	"BaseDielectricMapBase",
 	#Vertex Color
 	#"BaseDielectricMap_B",
 	#"BaseDielectricMap_G",
 	#"BaseDielectricMap_R",
 	"BaseMap",
+	"ColorMap",
+	"DetailAlbedoMap",
+	"DetailAlbedoMap2",
 	#"CloudMap",
 	"CloudMap_1",
 	"FaceBaseMap",
 	"Face_BaseDielectricMap",
+	"FlowMap_ColorMap",
+	"FoamColorMap",
+	"Fur_DepthColorMap",
+	"PatternColorMap",
+	"PupilColorMap",
+	"Rec_Mucus_BaseColor",
+	"SecondaryAlbedoMap",
+	"SecondaryBaseColorMap",
+	"Tex_BaseColor",
+	"WaterColorMap",
+	"WaveColorMap",
 	"Moon_Tex",
 	"Sky_Top_Tex",
 	"RTReflectionBaseMap",
@@ -115,7 +138,12 @@ normalTypeSet = set([
 	])
 
 alphaTypeSet = set([
-	"AlphaMap"
+	"AdditionalAlphaMap",
+	"Alpha",
+	"AlphaMap",
+	"AlphaMaskMap",
+	"AlphaMaskTex",
+	"AlphaTex",
 
 	])
 cmmTypeSet = set([
@@ -232,9 +260,40 @@ from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,getMHWildsDetailMapNodeGroup
 from ..ddsconv.directx.texconv import Texconv, unload_texconv
 DEBUG_MODE = False
+DEBUG_ALPHA_DIAGNOSTICS = True
 def debugprint(string):
 	if DEBUG_MODE:
 		print(string)
+
+def getSocketDebugName(socket):
+	if socket == None:
+		return "None"
+	try:
+		return f"{socket.node.name}.{socket.name}"
+	except:
+		return str(socket)
+
+def alphaDebugPrint(materialName, matInfo, hasAlpha, hasAlphaFlagB, alphaDecision, hasRealAlphaTex, isCutout, isTransparent):
+	if DEBUG_ALPHA_DIAGNOSTICS:
+		textureNames = sorted(list(matInfo["textureNodeDict"].keys()))
+		alphaProps = sorted([propName for propName in matInfo["mPropDict"].keys() if "alpha" in propName.lower() or propName in {"Transparent", "TearBlendRate", "DisappearanceRate"}])
+		print(
+			"[MDF Alpha] "
+			f"mat={materialName} "
+			f"game={matInfo['gameName']} "
+			f"mmtr={matInfo['mmtrName']} "
+			f"shader={matInfo['shaderType']} "
+			f"flagsAlpha={bool(hasAlpha)} "
+			f"flagsBAlphaUsed={bool(hasAlphaFlagB)} "
+			f"realAlphaTex={hasRealAlphaTex} "
+			f"cutout={isCutout} "
+			f"transparent={isTransparent} "
+			f"alphaSocket={getSocketDebugName(matInfo['alphaSocket'])} "
+			f"decision={alphaDecision} "
+			f"blend={matInfo['blenderMaterial'].blend_method} "
+			f"textures={textureNames} "
+			f"alphaProps={alphaProps}"
+		)
 
 ADDON_NAME = __package__.split(".")[0]
 def getChunkPathList(gameName):
@@ -382,6 +441,7 @@ texVersionDict = {
 	20:".31",
 	#21":".34",#Commented out so RE7RT streaming textures will be found
 	23:".28",
+	31:".241101895",
 	32:".143221013",
 	#40:".760230703",
 	45:".241106027",
@@ -455,11 +515,15 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		mdfMaterial = mdfMaterialDict.get(materialName,None)
 		textureNodeInfoList = []
 		if mdfMaterial != None:
-			isAlphaTested = bool(
-				mdfMaterial.flags.flagValues.BaseAlphaTestEnable or
-				mdfMaterial.flags.flagValues.AlphaTestEnable or
-				(mdfVersion < 31 and mdfMaterial.flags.flagValues.AlphaMaskUsed)
-			)
+			hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable
+			if mdfVersion < 31:
+				hasAlpha = hasAlpha or mdfMaterial.flags.flagValues.AlphaMaskUsed
+			hasAlphaFlagB = False
+			if mdfVersion >= 31:
+				try:
+					hasAlphaFlagB = mdfMaterial.flagsB.flagValues.AlphaUsed
+				except:
+					hasAlphaFlagB = False
 			if mdfMaterial.ver32Unkn0 == 1:
 				isAlphaTested = True
 			# Old Alpha Check
@@ -513,11 +577,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if textureType in albedoVertexColorTypeSet or textureType in normalVertexColorTypeSet:
 						hasVertexColor = True
 					if textureType in albedoTypeSet:
-						if textureType == "BaseDielectricMap" or textureType == "BaseDielectricMapBase":
+						if textureType in ("BaseDielectricMap", "BaseDielectricMap1", "BaseDielectricMap2", "BaseDielectricMapArray", "BaseDielectricMapBase", "SecondaryAlbedoMap"):
 							textureNodeInfoList.append(("ALBD",textureType,imageList,outputPath))
 						elif textureType == "BaseMetalMap" or textureType == "BaseMetalMapArray":
 							textureNodeInfoList.append(("ALBM",textureType,imageList,outputPath))
-						elif textureType == "BaseAlphaMap":
+						elif textureType in ("BaseAlphaMap", "BaseColorAlphaMap", "DetailAlbedoMap", "PupilColorMap", "Tex_BaseColor"):
 							textureNodeInfoList.append(("ALBA",textureType,imageList,outputPath))
 							
 							#hasAlpha = True
@@ -591,6 +655,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			matInfo = {
 				"mmtrName":os.path.split(mdfMaterial.mmtrPath.lower())[1],
 				"flags":mdfMaterial.flags.flagValues,
+				"flagsB":mdfMaterial.flagsB.flagValues,
 				"textureNodeDict":{},
 				"mPropDict":mdfMaterial.getPropertyDict(),
 				"currentPropPos":currentPropPos,
@@ -653,7 +718,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					
 			for (_,textureType,imageList,texturePath) in textureNodeInfoList:
 				try:
-					newNode = addImageNode(blenderMaterial.node_tree,textureType,imageList,texturePath,(currentXPos,currentYPos))
+					newNode = addImageNode(blenderMaterial.node_tree,textureType,imageList,texturePath,(currentXPos,currentYPos),matInfo["mmtrName"])
 					currentYPos += 350
 					#print(newNode)
 	
@@ -844,6 +909,25 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						#Use secondary uv on base alpha texture if it's enabled on the layer mask
 						#TODO Check this in game, there's a mesh that uses secondary uv but doesn't have base secondary uv flag enabled: "RE4_EXTRACT\re_chunk_000\natives\STM\_Chainsaw\Environment\sm\sm2X\sm21\sm21_515\sm21_515_00.mesh.221108797"
 						links.new(layerMaskUVMappingGroupNode.outputs["Vector"],nodeTree.nodes["BaseAlphaMap"].inputs["Vector"])
+				
+				# Ensure BaseAlphaMap gets UV mapping even when LayerMaskOcclusionMap doesn't exist
+				if "BaseAlphaMap" in nodeTree.nodes and "LayerMaskOcclusionMap" not in matInfo["textureNodeDict"]:
+					# Check if this is a hair material that should use secondary UV
+					isCutout = any(x in matInfo["mmtrName"] for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
+					
+					baseAlphaUVMappingNode = getDualUVMappingNodeGroup(nodeTree)
+					baseAlphaUVMappingNode.location = nodeTree.nodes["BaseAlphaMap"].location + Vector((-300,0))
+					nodeTree.links.new(UVMap1Node.outputs["UV"],baseAlphaUVMappingNode.inputs["UV1"])
+					nodeTree.links.new(UVMap2Node.outputs["UV"],baseAlphaUVMappingNode.inputs["UV2"])
+					
+					# Use secondary UV for hair/eyelash/eyebrow materials
+					if isCutout and matInfo["gameName"] != "SF6":
+						baseAlphaUVMappingNode.inputs["UseSecondaryUV"].default_value = 1.0
+					
+					links.new(baseAlphaUVMappingNode.outputs["Vector"],nodeTree.nodes["BaseAlphaMap"].inputs["Vector"])
+					LYMOSepNode = nodes.new("ShaderNodeSeparateColor")
+					LYMOSepNode.location = nodeTree.nodes["BaseAlphaMap"].location + Vector((300,0))
+					links.new(nodeTree.nodes["BaseAlphaMap"].outputs["Color"],LYMOSepNode.inputs["Color"])
 					layer1UVMappingGroupNode = None
 					layer2UVMappingGroupNode = None
 					if "UV_Tiling1" in matInfo["mPropDict"]:
@@ -1582,39 +1666,83 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					
 				
 				alphaClippingNode = None
+				alphaDecision = "NO_ALPHA_SOCKET"
+				hasRealAlphaTex = False
+				isCutout = False
+				isTransparent = False
 				if matInfo["alphaSocket"] is not None:
 					mmtr = matInfo["mmtrName"].lower()
 					shaderType = matInfo["shaderType"]
 
 					isCutout = any(x in mmtr for x in ["hair", "lash", "brow", "beard", "cap", "fur", "feather"])
 
-					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in ["BaseAlphaMap" ,"AlphaMap"])
+					hasRealAlphaTex = any(tex in matInfo["textureNodeDict"] for tex in [
+						"AlphaMap",
+						"AlphaMaskMap",
+						"AlphaMaskTex",
+						"AdditionalAlphaMap"
+					])
+					hasAlphaFlag = bool(hasAlpha)
 
+					isAlphaTested = (hasAlphaFlag or isCutout)
 					isTransparent = (
 						matInfo["isAlphaBlend"] or
 						shaderType in alphaBlendShaderTypes or
 						any(x in mmtr for x in ["glass", "decal", "transparent"])
-					)
+					) and matInfo["gameName"] != "SF6"
 
-					if not hasRealAlphaTex and not isCutout and not isTransparent and not isAlphaTested:
+					if matInfo["gameName"] == "SF6":
+						isTransparent = any (x in mmtr for x in [
+							"glass",
+							"eye"
+						])
+
+						isCutout = any(x in mmtr for x in [
+							"lash",
+							"hair",
+							"brow",
+							"beard"
+						])
+
+					if not hasAlphaFlag and not hasRealAlphaTex and not isCutout and not isTransparent:
 						matInfo["alphaSocket"] = None
-					elif isCutout or isAlphaTested:
-						matInfo["blenderMaterial"].blend_method = "CLIP"
-						matInfo["blenderMaterial"].alpha_threshold = 0.5
-						
-						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-
+						alphaDecision = "IGNORED_ALPHA_SOCKET"
 					elif isTransparent:
 						matInfo["blenderMaterial"].blend_method = "BLEND"
+						alphaDecision = "BLEND"
 
 						if bpy.app.version < (4,2,0):
 							matInfo["blenderMaterial"].shadow_method = "NONE"
 						
 						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
 
+					elif isCutout or isAlphaTested:
+						alphaDecision = "CLIP"
+						if bpy.app.version >= (4, 2, 0):
+							matInfo["blenderMaterial"].blend_method = "HASHED"
+							matInfo["blenderMaterial"].node_tree.nodes
+							if matInfo["alphaSocket"] is not None:
+								links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+						else:
+							matInfo["blenderMaterial"].blend_method = "CLIP"
+							matInfo["blenderMaterial"].alpha_threshold = 0.5
+							if matInfo["alphaSocket"] is not None:
+								links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+						
+						print(f"[HAIR DEBUG] material={materialName} mmtr={mmtr} alphaSocket={matInfo['alphaSocket']} threshold={matInfo['blenderMaterial'].alpha_threshold}")
 					else:
 						matInfo["blenderMaterial"].blend_method = "HASHED"
-						links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+						alphaDecision = "HASHED"
+						
+						if matInfo["gameName"] == "SF6":
+							links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
+				
+				if DEBUG_ALPHA_DIAGNOSTICS:
+					alphaTextureNames = alphaTypeSet.union({"BaseAlphaMap", "BaseColorAlphaMap", "Tex_BaseColor", "AlphaTranslucentOcclusionCavityMap", "AlphaTranslucentOcclusionSSSMap", "AlphaCavityOcclusionTranslucentMap", "NormalRoughnessAlphaMap", "StitchMap"})
+					hasAlphaTextureName = any(tex in matInfo["textureNodeDict"] for tex in alphaTextureNames)
+					hasAlphaPropertyName = any("alpha" in propName.lower() or propName in {"Transparent", "TearBlendRate", "DisappearanceRate"} for propName in matInfo["mPropDict"].keys())
+					if matInfo["alphaSocket"] is not None or hasAlpha or hasAlphaFlagB or hasAlphaTextureName or hasAlphaPropertyName or matInfo["isAlphaBlend"]:
+						alphaDebugPrint(materialName, matInfo, hasAlpha, hasAlphaFlagB, alphaDecision, hasRealAlphaTex, isCutout, isTransparent)
 				
 				if matInfo["sheenSocket"] != None:
 					if bpy.app.version < (4,0,0):

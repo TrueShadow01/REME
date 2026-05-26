@@ -8,7 +8,7 @@ from mathutils import Vector
 legacyUV2HairOcclusionList = set(["RE2","RE2RT","RE3","RE3RT","RE7RT","DMC5"])
 
 def addLoc(node,delta):#Just to shorten what would otherwise be a long line
-	return (node.location[0] + delta[0],node.location[1] + delta[0])
+	return (node.location[0] + delta[0],node.location[1] + delta[1])
 
 def getColorNodeGroup(nodeTree):#No RGBA node in shader editor so a custom group is needed
 	if "ColorNodeGroup" in bpy.data.node_groups:
@@ -725,37 +725,13 @@ missingTexTypeDict = {
 	"OCMA":(1.0,1.0,1.0,1.0),
 	}
 MAX_ARRAY_IMPORT_SIZE = 16#Blender can't handle much more than 16 mix nodes into a color node, so it gets treated as a single image node if it exceeds 16
-def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos):
+def addImageNode(nodeTree,textureType,imageList,texturePath,currentPos,mmtrName=""):
 	#print(f"Loading {texturePath}")
 	#print(len(imageList))
 	colorSpace = "sRGB" if textureType in albedoTypeSet or "alb" in texturePath.rsplit("_",1)[-1].lower() else "Non-Color"
 	
 	if len(imageList) == 1 or len(imageList) > MAX_ARRAY_IMPORT_SIZE:
 		imageNode = nodeTree.nodes.new('ShaderNodeTexImage')
-
-		# UV FIX BEGIN
-		uvNode = None
-
-		isHair = False
-		if "hair" in textureType.lower():
-			isHair = True
-		
-		uvMapName = "UVMap0"
-		if isHair:
-			uvMapName = "UVMap1"
-		
-		uvNodeName = f"{uvMapName}Node"
-
-		if uvMapName in nodeTree.nodes:
-			uvNode = nodeTree.nodes[uvNodeName]
-		else:
-			uvNode = nodeTree.nodes.new("ShaderNodeUVMap")
-			uvNode.name = uvNodeName
-			uvNode.uv_map = uvMapName
-			uvNode.location = (currentPos[0] - 300, currentPos[1] + 200)
-		
-		nodeTree.links.new(uvNode.outputs["UV"], imageNode.inputs["Vector"])
-		# UV FIX END
 
 		imageNode.name = textureType
 		imageNode.label = textureType
@@ -841,8 +817,18 @@ def newALBANode (nodeTree,textureType,matInfo):
 	currentPos = [imageNode.location[0]+300,imageNode.location[1]]
 	
 	matInfo["albedoNodeLayerGroup"].addMixLayer(imageNode.outputs["Color"],factorOutSocket = None,mixType = "MIX",mixFactor = 0.5)
+	isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in [
+		"hair", "lash", "brow", "beard"
+	]))
+	
+	if isSF6Hair:
+		invertNode = nodeTree.nodes.new("ShaderNodeInvert")
+		invertNode.location = (imageNode.location[0]+300, imageNode.location[1]-200)
+		nodeTree.links.new(imageNode.outputs["Alpha"], invertNode.inputs["Color"])
+		matInfo["alphaSocket"] = invertNode.outputs["Color"]
+	else:
+		matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
 
-	matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
 	return imageNode
 def newALBNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
@@ -1376,11 +1362,20 @@ def newATOSNode (nodeTree,textureType,matInfo):
 			nodeTree.links.new(alphaUV2Node.outputs["Value"],mixUVAlphaNode.inputs["Fac"])
 			currentPos[0] += 300
 			if not isMTOS and not isMaskAlpha:
-				matInfo["alphaSocket"] = mixUVAlphaNode.outputs["Color"]
+				# Prefer real image alpha channel if available, otherwise use mixed red channel
+				if hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+					matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
+				else:
+					matInfo["alphaSocket"] = mixUVAlphaNode.outputs["Color"]
 		else:
 			if not isMTOS and not isMaskAlpha:
-				matInfo["alphaSocket"] = separateNode.outputs["Red"]
-		
+				isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in ["hair", "lash", "brow", "beard"]))
+				if isSF6Hair:
+					matInfo["alphaSocket"] = separateNode.outputs["Red"]  # SF6 hair alpha is in Red channel
+				elif hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+					matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
+				else:
+					matInfo["alphaSocket"] = separateNode.outputs["Red"]
 		if occlusionUV2Node != None or useLegacyHairUV2Occlusion:
 			mixUVOCCNode = nodeTree.nodes.new('ShaderNodeMixRGB')
 			mixUVOCCNode.location = currentPos
@@ -1410,7 +1405,13 @@ def newATOSNode (nodeTree,textureType,matInfo):
 				matInfo["cavityNodeLayerGroup"].addMixLayer(imageNode.outputs["Alpha"])
 	else:
 		if not isMTOS and not isMaskAlpha and not "StitchMap" in matInfo["textureNodeDict"]:
-			matInfo["alphaSocket"] = separateNode.outputs["Red"]
+			isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in ["hair", "lash", "brow", "beard"]))
+			if isSF6Hair:
+				matInfo["alphaSocket"] = separateNode.outputs["Red"]  # SF6 hair alpha is in Red channel
+			elif hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
+				matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
+			else:
+				matInfo["alphaSocket"] = separateNode.outputs["Red"]
 		matInfo["translucentSocket"] = separateNode.outputs["Green"]
 		if matInfo["gameName"] != "SF6" and not useLegacyHairUV2Occlusion:#SF6 uses occlusion channel for something else
 			matInfo["aoNodeLayerGroup"].addMixLayer(separateNode.outputs["Blue"])
@@ -1494,7 +1495,42 @@ def newUNKNNode (nodeTree,textureType,matInfo):
 		imageNode.image.colorspace_settings.name = "sRGB"
 	else:
 		imageNode.image.colorspace_settings.name = "Non-Color"
-	imageNode.image.alpha_mode = "CHANNEL_PACKED"
+	# Auto-detect premultiplied vs straight alpha when possible
+	try:
+		img = imageNode.image
+		if img is not None:
+			try:
+				if getattr(img, "channels", 0) >= 4:
+					total_pixels = (img.size[0] * img.size[1]) if hasattr(img, "size") else 0
+					if total_pixels > 0:
+						sample_count = min(1000, total_pixels)
+						pixels = list(img.pixels)
+						step = max(1, total_pixels // sample_count)
+						has_alpha = 0
+						premul_votes = 0
+						straight_votes = 0
+						for i in range(0, total_pixels, step):
+							idx = i * img.channels
+							r = pixels[idx]
+							g = pixels[idx+1]
+							b = pixels[idx+2]
+							a = pixels[idx+3]
+							if a < 0.99:
+								has_alpha += 1
+								if r > a + 0.01 or g > a + 0.01 or b > a + 0.01:
+									straight_votes += 1
+								else:
+									premul_votes += 1
+						if has_alpha > 0:
+							img.alpha_mode = "STRAIGHT" if straight_votes >= premul_votes else "PREMUL"
+						else:
+							img.alpha_mode = "STRAIGHT"
+					else:
+						img.alpha_mode = "STRAIGHT"
+			except Exception:
+				img.alpha_mode = "CHANNEL_PACKED"
+	except Exception:
+		imageNode.image.alpha_mode = "CHANNEL_PACKED"
 	imageNode.location = currentPos
 	return imageNode
 """

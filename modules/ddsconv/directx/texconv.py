@@ -204,6 +204,8 @@ class Texconv:
             print(f'DXGI_FORMAT: {dds_header.get_format_as_str()}')
         fmt = "png"
         args = ['-m','1','-ft',fmt]
+        # Ensure alpha channels are preserved correctly when converting to png
+        args += ['-sepalpha']
         if "SRGB" in dds_header.get_format_as_str():
             args += ['-f','R8G8B8A8_UNORM_SRGB']
         else:

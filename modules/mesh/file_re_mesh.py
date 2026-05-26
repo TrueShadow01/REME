@@ -1797,8 +1797,8 @@ def WriteToWeightBuffer(bufferStream,boneWeightsList,boneIndicesList,isSixWeight
 	#print(weightSums)
 	#Normalize weights to 1.0
 	with np.errstate(divide='ignore', invalid='ignore'):
-	    boneWeightsArray = boneWeightsArray / weightSums[:,None]
-	    boneWeightsArray[weightSums == 0] = 0
+		boneWeightsArray = boneWeightsArray / weightSums[:,None]
+		boneWeightsArray[weightSums == 0] = 0
 	boneWeightsArray = np.multiply(boneWeightsArray,255)
 	boneWeightsArray = np.round(boneWeightsArray)
 	diffSums = 255.0 - np.sum(boneWeightsArray,axis = 1,dtype = np.float32)
@@ -1880,8 +1880,8 @@ def WriteToWeightBufferExtended(bufferStream,boneWeightsList,boneIndicesList,ext
 	#print(weightSums)
 	#Normalize weights to 1.0
 	with np.errstate(divide='ignore', invalid='ignore'):
-	    boneWeightsArray = boneWeightsArray / weightSums[:,None]
-	    boneWeightsArray[weightSums == 0] = 0
+		boneWeightsArray = boneWeightsArray / weightSums[:,None]
+		boneWeightsArray[weightSums == 0] = 0
 	boneWeightsArray = np.multiply(boneWeightsArray,255)
 	boneWeightsArray = np.round(boneWeightsArray)
 	diffSums = 255.0 - np.sum(boneWeightsArray,axis = 1,dtype = np.float32)
@@ -2380,7 +2380,8 @@ def ParsedREMeshToREMesh(parsedMesh,meshVersion):
 	
 		
 	if version >= VERSION_SF6:
-		reMesh.fileHeader.sf6UnknCount = 84
+		#reMesh.fileHeader.sf6UnknCount = 84
+		reMesh.fileHeader.sf6UnknCount = 6 if version == VERSION_SF6 else 84
 		reMesh.meshBufferHeader.vertexElementSize = 27104
 		reMesh.fileHeader.verticesOffset = reMesh.meshBufferHeader.vertexBufferOffset
 		reMesh.fileHeader.streamingInfoOffset =  reMesh.fileHeader.meshOffset + sd.VERTEX_ELEMENT_OFFSET - 16
@@ -2389,11 +2390,6 @@ def ParsedREMeshToREMesh(parsedMesh,meshVersion):
 		reMesh.meshBufferHeader.totalBufferSize = getPaddedPos(reMesh.meshBufferHeader.block2FaceBufferOffset,16)
 		unknFlag16 = True
 		unknFlag10 = True
-	
-	if version == VERSION_SF6:
-		reMesh.fileHeader.sf6UnknCount = 6
-		reMesh.fileHeader.lodGroupNameHash = 3407096719	
-	
 	
 	currentOffset = getPaddedPos(reMesh.meshBufferHeader.faceBufferOffset + reMesh.meshBufferHeader.faceBufferSize,16)
 	if version >= VERSION_DD2:	
@@ -2462,6 +2458,17 @@ def readREMesh(filepath,lodTarget = None):
 					print(f"Loaded {len(streamingBuffer)} bytes from streaming mesh at {streamingMeshPath}")
 				except:
 					raiseError("Failed to open " + filepath)
+		else:
+			# Fallback for loose folders: check for a sibling 'streaming' directory
+			folder, name = os.path.split(filepath)
+			streamingMeshPath = os.path.join(folder, "streaming", name)
+			if os.path.isfile(streamingMeshPath):
+				try:
+					with open(streamingMeshPath, "rb") as streamFile:
+						streamingBuffer = streamFile.read()
+						print(f"Loaded {len(streamingBuffer)} bytes from loose streaming mesh at {streamingMeshPath}")
+				except:
+					raiseError("Failed to open streaming file: " + streamingMeshPath)
 	if magic == 1498173517 and IMPORT_MPLY:#MPLY Mesh
 		reMeshFile = REMeshMPLY()
 		print("Loading MPLY mesh.")
@@ -2486,4 +2493,3 @@ def writeREMesh(reMeshFile,filepath):
 	reMeshFile.meshVersion = meshVersion
 	reMeshFile.write(file,version)
 	file.close()
-
