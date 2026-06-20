@@ -53,7 +53,52 @@ from .file_re_mesh_mply import REMeshMPLY
 # 5. The parsed mesh format is rebuilt inside blender_re_mesh.py once it has been error checked
 # 6. The parsed format is passed back to file_re_mesh.py and rebuilt into a mesh structure (ParsedREMeshToREMesh())
 
-IMPORT_BLEND_SHAPES = False  # Disabled by default because it's broken at  the moment.
+IMPORT_BLEND_SHAPES = False  # Legacy (SF6 and earlier) blend shape import is still broken; keep disabled.
+
+# MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
+# always imported regardless of IMPORT_BLEND_SHAPES. Other games stay gated by the flag above.
+WILDS_PACKED_BLEND_SHAPE_FILE_VERSIONS = frozenset(
+    [
+        240820143,  # VERSION_MHWILDS_BETA
+        241111606,  # VERSION_MHWILDS
+        250604100,  # VERSION_MHS3
+    ]
+)
+
+# Blend shape debug instrumentation. Set True to print struct/offset dumps during import.
+DEBUG_BLEND_SHAPES = False
+
+
+def _bsDump(*args):
+    if DEBUG_BLEND_SHAPES:
+        print("[BS]", *args)
+
+
+def _bsHexDump(buf, offset=0, length=128, label=""):
+    # Hex + uint16/int16/float16 dump of a byte buffer region, for decoding raw delta data.
+    if not DEBUG_BLEND_SHAPES:
+        return
+    import numpy as _np
+
+    data = bytes(buf[offset : offset + length])
+    if len(data) == 0:
+        print(f"[BS] HEXDUMP {label}: EMPTY (offset {offset}, buflen {len(buf)})")
+        return
+    # Trim to a multiple of 8 so the 4x uint16 view is clean
+    n8 = (len(data) // 8) * 8
+    print(f"[BS] HEXDUMP {label}: offset {offset}, showing {n8} of {len(buf)} bytes")
+    u16 = _np.frombuffer(data[:n8], dtype="<H")
+    i16 = _np.frombuffer(data[:n8], dtype="<h")
+    f16 = _np.frombuffer(data[:n8], dtype="<e")
+    for v in range(n8 // 8):
+        b = v * 4
+        hexBytes = " ".join(f"{x:02X}" for x in data[v * 8 : v * 8 + 8])
+        print(
+            f"[BS]   {v:2d}: [{hexBytes}] "
+            f"u16={tuple(int(x) for x in u16[b : b + 4])} "
+            f"i16={tuple(int(x) for x in i16[b : b + 4])} "
+            f"f16=({f16[b]:.4f},{f16[b + 1]:.4f},{f16[b + 2]:.4f},{f16[b + 3]:.4f})"
+        )
 # Set to True if you want to try to fix blend shape importing. The relevant code is in re_mesh_parse.py.
 # There's something wrong with getting the amount of deltas and also the way the deltas are parsed is not correct.
 
@@ -1331,6 +1376,7 @@ class BlendTarget:
         self.subMeshEntryList = []
 
     def read(self, file, version):
+        startPos = file.tell()
         if version < VERSION_SF6:
             self.subMeshVertexStartIndex = read_uint(file)
             self.vertCount = read_uint(file)
@@ -1352,6 +1398,17 @@ class BlendTarget:
                 self.subMeshEntryList.append(subMeshEntry)
 
             file.seek(currentPos)
+        _bsDump(
+            f"  BlendTarget @ {startPos}: subMeshVertexStartIndex={self.subMeshVertexStartIndex} "
+            f"vertCount={self.vertCount} blendSSIndex={self.blendSSIndex} blendShapeNum={self.blendShapeNum} "
+            f"deltaOffset={self.deltaOffset} unkn0={self.unkn0} subMeshEntryCount={self.subMeshEntryCount} "
+            f"unkn2={self.unkn2} subMeshEntryOffset={self.subMeshEntryOffset}"
+        )
+        for j, sm in enumerate(self.subMeshEntryList):
+            _bsDump(
+                f"    BlendSubMesh[{j}]: subMeshVertexStartIndex={sm.subMeshVertexStartIndex} "
+                f"vertOffset={sm.vertOffset} vertCount={sm.vertCount} paramUnkn3={sm.paramUnkn3}"
+            )
 
     def write(self, file, version):  # TODO FIX WRITE
         write_uint64(file, self.count)
@@ -1382,6 +1439,7 @@ class BlendShapeData:
         self.blendSSList = []
 
     def read(self, file, version):
+        startPos = file.tell()
         self.targetCount = read_ushort(file)
         self.typing = read_ushort(file)
         self.unknFlag = read_uint(file)
@@ -1391,6 +1449,11 @@ class BlendShapeData:
         self.aabbOffset = read_uint64(file)
         self.blendSOffset = read_uint64(file)
         self.blendSSOffset = read_uint64(file)
+        _bsDump(
+            f"BlendShapeData @ {startPos}: targetCount={self.targetCount} typing={self.typing} "
+            f"unknFlag={self.unknFlag} dataOffset={self.dataOffset} aabbOffset={self.aabbOffset} "
+            f"blendSOffset={self.blendSOffset} blendSSOffset={self.blendSSOffset}"
+        )
         file.seek(self.dataOffset)
         for i in range(0, self.targetCount):
             blendTargetEntry = BlendTarget()
@@ -1402,11 +1465,16 @@ class BlendShapeData:
             aabbEntry = AABB()
             aabbEntry.read(file)
             self.aabbList.append(aabbEntry)
+            _bsDump(
+                f"  AABB[{i}]: min=({aabbEntry.min.x},{aabbEntry.min.y},{aabbEntry.min.z}) "
+                f"max=({aabbEntry.max.x},{aabbEntry.max.y},{aabbEntry.max.z})"
+            )
         self.blendS = [read_int(file), read_int(file), read_int(file)]
         self.blendSSList = []
         for blendTarget in self.blendTargetList:
             for i in range(0, blendTarget.blendShapeNum):
                 self.blendSSList.append(read_int(file))
+        _bsDump(f"  blendS={self.blendS} blendSSList={self.blendSSList}")
 
     def write(self, file):  # TODO FIX WRITE
         write_ushort(file, self.targetCount)
@@ -1448,9 +1516,14 @@ class BlendShapeHeader:
             self.zero = read_uint64(file)
             self.mainOffset = read_uint64(file)
         self.hash = read_uint64(file)
+        _bsDump(
+            f"BlendShapeHeader: count={self.count} mainOffset={self.mainOffset} "
+            f"zero={self.zero} hash={self.hash}"
+        )
         self.blendShapeOffsetList = []
         for i in range(0, self.count):
             self.blendShapeOffsetList.append(read_uint64(file))
+        _bsDump(f"blendShapeOffsetList={self.blendShapeOffsetList}")
         self.blendShapeList = []
         currentPos = file.tell()
         for i in range(0, self.count):
@@ -1687,10 +1760,25 @@ class REMesh:
 			self.normalRecalcHeader = NormalRecalc()
 			self.normalRecalcHeader.read(file,sum([i.vertexCount for i in self.lodHeader.lodGroupList[0].meshGroupList]),sum([i.faceCount for i in self.lodHeader.lodGroupList[0].meshGroupList]))
 		"""
-        if self.fileHeader.blendShapesOffset and IMPORT_BLEND_SHAPES:
+        if self.fileHeader.blendShapesOffset and (
+            IMPORT_BLEND_SHAPES
+            or self.meshVersion in WILDS_PACKED_BLEND_SHAPE_FILE_VERSIONS
+        ):
+            _bsDump("=" * 60)
+            _bsDump(
+                f"version={version} VERSION_MHWILDS={VERSION_MHWILDS} "
+                f"blendShapesOffset={self.fileHeader.blendShapesOffset} "
+                f"blendShapeNameOffset={self.fileHeader.blendShapeNameOffset}"
+            )
             file.seek(self.fileHeader.blendShapesOffset)
             self.blendShapeHeader = BlendShapeHeader()
-            self.blendShapeHeader.read(file, version)
+            try:
+                self.blendShapeHeader.read(file, version)
+            except Exception as err:
+                import traceback
+
+                _bsDump(f"BlendShapeHeader.read FAILED: {err}")
+                _bsDump(traceback.format_exc())
 
         if self.fileHeader.aabbOffset:
             file.seek(self.fileHeader.aabbOffset)

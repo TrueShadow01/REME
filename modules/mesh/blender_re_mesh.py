@@ -28,9 +28,11 @@ from .file_re_mesh import (
 )
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow
 from .re_mesh_parse import (
+    BlendShape,
     LODLevel,
     ParsedBone,
     ParsedREMesh,
+    PACKED_BLEND_SHAPE_MESH_VERSIONS,
     Skeleton,
     SubMesh,
     VisconGroup,
@@ -538,19 +540,24 @@ def importMesh(
         skB.interpolation = "KEY_LINEAR"
         print(meshObj.name)
 
+        # Deltas are decoded in game space; rotate them to match the mesh's rotated basis.
+        rot3 = rotate90Matrix.to_3x3() if rotate90 else None
         for blendShapeEntry in blendShapeList:
             name = blendShapeEntry.blendShapeName
             print(name)
             # print(blendShapeEntry.deltas)
-            deltas = [Vector(val) for val in blendShapeEntry.deltas]
+            if rot3 is not None:
+                deltas = [rot3 @ Vector(val) for val in blendShapeEntry.deltas]
+            else:
+                deltas = [Vector(val) for val in blendShapeEntry.deltas]
             # print(deltas)
             sk = meshObj.shape_key_add(name=name)
             sk.interpolation = "KEY_LINEAR"
             print(f"mesh vertices: {len(meshObj.data.vertices)}")
             print(f"delta vertices: {len(deltas)}")
-            # if len(deltas) == len(meshObj.data.vertices):
-            for i in range(len(meshObj.data.vertices)):
-                sk.data[i].co = meshObj.data.vertices[i].co + deltas[i]
+            if len(deltas) == len(meshObj.data.vertices):
+                for i in range(len(meshObj.data.vertices)):
+                    sk.data[i].co = meshObj.data.vertices[i].co + deltas[i]
 
     return meshObj
 
@@ -2054,6 +2061,40 @@ def exportREMeshFile(filePath, options):
                             parsedSubMesh.secondaryWeightIndicesList[
                                 currentVertIndex
                             ] = list(pad(secondaryWeightIndicesList, size=8, padding=0))
+
+                # MH Wilds-era blend shape (shape key) export. Read shape keys from the original
+                # object and store per-vertex deltas in game space, matching the exported vertex
+                # order (evaluatedSubMeshData.vertices[i]). Encoded later in ParsedREMeshToREMesh.
+                if (
+                    meshVersion in PACKED_BLEND_SHAPE_MESH_VERSIONS
+                    and options.get("exportBlendShapes", True)
+                    and rawsubmesh.data.shape_keys is not None
+                    and len(rawsubmesh.data.shape_keys.key_blocks) > 1
+                ):
+                    keyBlocks = rawsubmesh.data.shape_keys.key_blocks
+                    basisBlock = keyBlocks[0]
+                    skVertCount = len(evaluatedSubMeshData.vertices)
+                    if len(basisBlock.data) == skVertCount:
+                        # Deltas transform by the rotation/scale (3x3) of the submesh world matrix,
+                        # the same transform applied to the vertex positions (translation cancels).
+                        blendRot = np.array(subMeshWorldMatrix.to_3x3())
+                        basisCo = np.empty(skVertCount * 3, dtype=np.float32)
+                        basisBlock.data.foreach_get("co", basisCo)
+                        basisCo = basisCo.reshape(-1, 3)
+                        for kb in keyBlocks[1:]:
+                            skCo = np.empty(skVertCount * 3, dtype=np.float32)
+                            kb.data.foreach_get("co", skCo)
+                            skCo = skCo.reshape(-1, 3)
+                            blendShapeEntry = BlendShape()
+                            blendShapeEntry.blendShapeName = kb.name
+                            blendShapeEntry.deltas = (
+                                (skCo - basisCo) @ blendRot.T
+                            ).astype(np.float32)
+                            parsedSubMesh.blendShapeList.append(blendShapeEntry)
+                    else:
+                        raiseWarning(
+                            f"Shape key vertex count mismatch on {rawsubmesh.name}; skipping blend shape export."
+                        )
 
                 visconGroup.subMeshList.append(parsedSubMesh)
                 if any(

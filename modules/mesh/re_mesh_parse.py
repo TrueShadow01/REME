@@ -8,6 +8,8 @@ from .file_re_mesh import (
     CompressedSixWeightIndices,
     Matrix4x4,
     Sphere,
+    _bsDump,
+    _bsHexDump,
 )
 
 # MESH VERSIONS
@@ -25,6 +27,17 @@ SIX_WEIGHT_MESH_VERSIONS = frozenset(
         VERSION_MHWILDS,
         VERSION_MHS3,
         # VERSION_PRAGDEMO,
+    ]
+)
+
+# MH Wilds-era meshes store blend shapes differently from SF6 and earlier: the deltas are
+# 11/10/11-bit packed values in the undeclared tail of each streaming vertex buffer (blend
+# shape data typing == 7), rather than the byte/short delta buffers used by older games.
+PACKED_BLEND_SHAPE_MESH_VERSIONS = frozenset(
+    [
+        VERSION_MHWILDS_BETA,
+        VERSION_MHWILDS,
+        VERSION_MHS3,
     ]
 )
 
@@ -417,6 +430,270 @@ class BlendShape:
         self.deltas = []
 
 
+def _bsUnpack111011(u32):
+    # Wilds blend delta packing: x=11 bits, y=10 bits, z=11 bits. Returns normalized 0..1.
+    x = (u32 & 0x7FF).astype(np.float32) / 2047.0
+    y = ((u32 >> 11) & 0x3FF).astype(np.float32) / 1023.0
+    z = ((u32 >> 21) & 0x7FF).astype(np.float32) / 2047.0
+    return x, y, z
+
+
+def _bsDecodeTest(label, tail, vertCount, blendShapeNum, aabb, names):
+    # Verify hypothesis: deltas are a dense [blendShapeNum x vertCount] block of 4-byte
+    # 11/10/11 packed values at the END of the tail, dequantized through the AABB.
+    deltaBytes = blendShapeNum * vertCount * 4
+    deltaStart = len(tail) - deltaBytes
+    _bsDump(
+        f"  [DECODE {label}] vertCount={vertCount} blendShapeNum={blendShapeNum} "
+        f"deltaBytes={deltaBytes} deltaStart={deltaStart} tailSize={len(tail)}"
+    )
+    if deltaStart < 0:
+        _bsDump(f"  [DECODE {label}] deltaStart negative, hypothesis FAILS")
+        return
+    u32 = np.frombuffer(tail[deltaStart : deltaStart + deltaBytes], dtype="<I").reshape(
+        blendShapeNum, vertCount
+    )
+    sentinel = 0x7FEFFBFF
+    frac = float((u32 == sentinel).mean())
+    _bsDump(f"  [DECODE {label}] sentinel(0x7FEFFBFF) fraction in delta block = {frac:.3f}")
+    # value just before deltaStart should be index-table-like (NOT sentinel) if there is a table
+    if deltaStart >= 4:
+        before = int(np.frombuffer(tail[deltaStart - 4 : deltaStart], dtype="<I")[0])
+        _bsDump(f"  [DECODE {label}] uint32 right before deltaStart = 0x{before:08X}")
+
+    def decodeShapeVert(s, v):
+        val = u32[s, v]
+        nx, ny, nz = _bsUnpack111011(np.array([val], dtype="<u4"))
+        dx = aabb.min.x + nx[0] * (aabb.max.x - aabb.min.x)
+        dy = aabb.min.y + ny[0] * (aabb.max.y - aabb.min.y)
+        dz = aabb.min.z + nz[0] * (aabb.max.z - aabb.min.z)
+        return val, (dx, dy, dz)
+
+    # Sentinel sanity: decode the raw sentinel
+    snx, sny, snz = _bsUnpack111011(np.array([sentinel], dtype="<u4"))
+    _bsDump(
+        f"  [DECODE {label}] sentinel decodes to normalized=({snx[0]:.4f},{sny[0]:.4f},{snz[0]:.4f}) "
+        f"-> delta=({aabb.min.x + snx[0] * (aabb.max.x - aabb.min.x):.5f},"
+        f"{aabb.min.y + sny[0] * (aabb.max.y - aabb.min.y):.5f},"
+        f"{aabb.min.z + snz[0] * (aabb.max.z - aabb.min.z):.5f})"
+    )
+    # Decode first few verts of a few shapes
+    for s in [0, 1, 8, blendShapeNum - 1]:
+        nm = names[s] if s < len(names) else "?"
+        line = f"  [DECODE {label}] shape[{s}]={nm}:"
+        for v in range(4):
+            val, d = decodeShapeVert(s, v)
+            line += f" v{v}=0x{int(val):08X}->({d[0]:.4f},{d[1]:.4f},{d[2]:.4f})"
+        _bsDump(line)
+
+
+def _bsTailAnalysis(label, tail):
+    # Programmatic analysis of a blend-shape vertex-buffer tail. Finds: the leading
+    # (n, n*64) index/offset table length, the index range, the transition to packed
+    # delta data, and the most common 8-byte record (the "zero displacement" sentinel).
+    n = len(tail)
+    _bsDump(f"  [TAIL {label}] size={n} /4={n // 4} /8={n // 8} /16={n // 16}")
+    if n < 8:
+        return
+    nPairs = n // 4
+    u16 = np.frombuffer(tail[: nPairs * 4], dtype="<H").reshape(-1, 2)
+    lo = u16[:, 0].astype(np.int64)
+    hi = u16[:, 1].astype(np.int64)
+    match = hi == (lo * 64)
+    if match.all():
+        runPairs = len(match)
+    elif match[0]:
+        runPairs = int(np.argmin(match))
+    else:
+        runPairs = 0
+    tableBytes = runPairs * 4
+    _bsDump(
+        f"  [TAIL {label}] leading (n,n*64) pairs={runPairs} tableBytes={tableBytes} "
+        f"matchFraction={float(match.mean()):.3f}"
+    )
+    if runPairs > 0:
+        idxRun = lo[:runPairs]
+        _bsDump(
+            f"  [TAIL {label}] index table: min={int(idxRun.min())} max={int(idxRun.max())} "
+            f"distinct={len(np.unique(idxRun))} first12={idxRun[:12].tolist()}"
+        )
+    _bsHexDump(tail, tableBytes, 64, f"{label} @transition({tableBytes})")
+    rest = tail[tableBytes:]
+    nRec = len(rest) // 8
+    if nRec > 0:
+        rec = np.frombuffer(rest[: nRec * 8], dtype="<Q")
+        vals, counts = np.unique(rec, return_counts=True)
+        order = np.argsort(counts)[::-1][:6]
+        _bsDump(f"  [TAIL {label}] after-table 8-byte records={nRec}, top recurring values:")
+        for ti in order:
+            v = int(vals[ti])
+            c = int(counts[ti])
+            b = v.to_bytes(8, "little")
+            u = np.frombuffer(b, dtype="<H")
+            _bsDump(
+                f"      0x{v:016X} count={c} ({100 * c / nRec:.2f}%) "
+                f"u16={tuple(int(x) for x in u)}"
+            )
+    _bsHexDump(tail, max(0, n - 64), 64, f"{label} @end")
+
+
+def _bsDeltaLocationDiagnostic(reMesh, vertexDictList):
+    # Goal: find WHERE the Wilds blend shape deltas live. They are not appended to the main
+    # vertex buffer (that gives negative sizes). Suspect: per streaming entry, after the
+    # vertex+face data. We dump the full streaming layout and match expected delta sizes.
+    bsh = reMesh.blendShapeHeader
+    mbh = reMesh.meshBufferHeader
+
+    _bsDump("########## DELTA LOCATION DIAGNOSTIC ##########")
+    # Expected delta byte size per LOD, from the parsed header
+    for li, bsData in enumerate(bsh.blendShapeList):
+        stride = 4 if bsData.typing == 0 else 8
+        for bt in bsData.blendTargetList:
+            verts = (
+                sum(sm.vertCount for sm in bt.subMeshEntryList)
+                if bt.subMeshEntryList
+                else bt.vertCount
+            )
+            _bsDump(
+                f"  LOD{li}: typing={bsData.typing} stride={stride} blendShapeNum={bt.blendShapeNum} "
+                f"vertsPerShape={verts} -> expectedDeltaBytes={bt.blendShapeNum * verts * stride}"
+            )
+
+    # Streaming info entries (raw byte ranges into the streaming file)
+    sih = reMesh.streamingInfoHeader
+    if sih is not None:
+        _bsDump(f"  streamingInfo entryCount={sih.entryCount}")
+        for i, e in enumerate(sih.streamingInfoEntryList):
+            _bsDump(f"    streamInfo[{i}]: bufferStart={e.bufferStart} bufferLength={e.bufferLength}")
+    _bsDump(
+        f"  streamingBuffer total len = "
+        f"{len(reMesh.streamingBuffer) if reMesh.streamingBuffer is not None else None}"
+    )
+
+    # Per streaming buffer header entry: sizes + element layout + candidate delta region
+    streamEntries = getattr(mbh, "streamingBufferHeaderList", [])
+    _bsDump(f"  streamingBufferHeaderList count = {len(streamEntries)}")
+    for i, se in enumerate(streamEntries):
+        _bsDump(
+            f"  --- entry[{i}]: totalBufferSize={se.totalBufferSize} vertexBufferLength={se.vertexBufferLength} "
+            f"unpaddedBufferSize={getattr(se, 'unpaddedBufferSize', '?')} "
+            f"unpaddedBufferSize2={getattr(se, 'unpaddedBufferSize2', '?')} "
+            f"nextBufferOffset={getattr(se, 'nextBufferOffset', '?')} "
+            f"len(vertexBuffer)={len(se.vertexBuffer) if se.vertexBuffer is not None else None} "
+            f"len(faceBuffer)={len(se.faceBuffer) if se.faceBuffer is not None else None}"
+        )
+        for j, ve in enumerate(se.vertexElementList):
+            _bsDump(
+                f"      elem[{j}]: typing={ve.typing} stride={ve.stride} posStartOffset={ve.posStartOffset}"
+            )
+        # The deltas are the UNDECLARED tail of vertexBuffer: bytes after the last vertex
+        # element end, up to vertexBufferLength. Compute that boundary and dump it.
+        if len(se.vertexElementList) >= 2 and se.vertexBuffer is not None:
+            posElem = se.vertexElementList[0]
+            secondElem = se.vertexElementList[1]
+            vertCount = (
+                (secondElem.posStartOffset - posElem.posStartOffset) // posElem.stride
+                if posElem.stride
+                else 0
+            )
+            lastElem = se.vertexElementList[-1]
+            endOfElements = lastElem.posStartOffset + vertCount * lastElem.stride
+            tailSize = len(se.vertexBuffer) - endOfElements
+            _bsDump(
+                f"      vertCount={vertCount} endOfElements={endOfElements} "
+                f"vertexBufferLen={len(se.vertexBuffer)} TAIL(delta?)Size={tailSize} "
+                f"(/8={tailSize // 8}, /16={tailSize // 16}, /6={tailSize // 6})"
+            )
+            if tailSize > 0:
+                tail = se.vertexBuffer[endOfElements:]
+                _bsTailAnalysis(f"entry[{i}]", tail)
+                # Map streaming entry i -> blend shape LOD i, and run the decode test
+                if i < len(bsh.blendShapeList):
+                    bsData = bsh.blendShapeList[i]
+                    bt = bsData.blendTargetList[0]
+                    bsVertCount = (
+                        sum(sm.vertCount for sm in bt.subMeshEntryList)
+                        if bt.subMeshEntryList
+                        else bt.vertCount
+                    )
+                    aabb = bsData.aabbList[0]
+                    names = [
+                        reMesh.rawNameList[reMesh.blendShapeNameRemapList[k]]
+                        for k in range(min(bt.blendShapeNum, len(reMesh.blendShapeNameRemapList)))
+                    ]
+                    _bsDecodeTest(
+                        f"entry[{i}]", tail, bsVertCount, bt.blendShapeNum, aabb, names
+                    )
+    _bsDump("########## END DELTA LOCATION DIAGNOSTIC ##########")
+
+
+def _decodeWildsBlendShapes(reMesh):
+    # MH Wilds (typing=7) blend shapes. Deltas live in the UNDECLARED TAIL of each streaming
+    # entry's vertexBuffer (after the last declared vertex element), as a dense
+    # [blendShapeNum x vertCount] block of 4-byte 11/10/11-packed values, dequantized via the
+    # per-LOD AABB. Returns {lodIndex: {subMeshVertexStartIndex: [BlendShape, ...]}}.
+    result = {}
+    bsh = reMesh.blendShapeHeader
+    mbh = reMesh.meshBufferHeader
+    if bsh is None or mbh is None:
+        return result
+    streamEntries = getattr(mbh, "streamingBufferHeaderList", [])
+    remap = reMesh.blendShapeNameRemapList
+    for lodIndex, bsData in enumerate(bsh.blendShapeList):
+        if lodIndex >= len(streamEntries):
+            break
+        se = streamEntries[lodIndex]
+        if se.vertexBuffer is None or len(se.vertexElementList) < 2 or not bsData.blendTargetList:
+            continue
+        posElem = se.vertexElementList[0]
+        if not posElem.stride:
+            continue
+        meshVertCount = (
+            se.vertexElementList[1].posStartOffset - posElem.posStartOffset
+        ) // posElem.stride
+        lastElem = se.vertexElementList[-1]
+        endOfElements = lastElem.posStartOffset + meshVertCount * lastElem.stride
+        tail = se.vertexBuffer[endOfElements:]
+        bt = bsData.blendTargetList[0]
+        subEntries = bt.subMeshEntryList if bt.subMeshEntryList else [bt]
+        totalVerts = sum(getattr(sm, "vertCount", 0) for sm in subEntries)
+        blendShapeNum = bt.blendShapeNum
+        if totalVerts == 0 or blendShapeNum == 0:
+            continue
+        deltaBytes = blendShapeNum * totalVerts * 4
+        # 16-align the start to skip the leading index/meshlet table and trailing padding.
+        deltaStart = ((len(tail) - deltaBytes) // 16) * 16
+        if deltaStart < 0:
+            continue
+        u32 = np.frombuffer(tail[deltaStart : deltaStart + deltaBytes], dtype="<I")
+        if u32.size != blendShapeNum * totalVerts:
+            continue
+        u32 = u32.reshape(blendShapeNum, totalVerts)
+        aabb = bsData.aabbList[0]
+        nx = (u32 & 0x7FF).astype(np.float32) / 2047.0
+        ny = ((u32 >> 11) & 0x3FF).astype(np.float32) / 1023.0
+        nz = ((u32 >> 21) & 0x7FF).astype(np.float32) / 2047.0
+        dx = aabb.min.x + nx * (aabb.max.x - aabb.min.x)
+        dy = aabb.min.y + ny * (aabb.max.y - aabb.min.y)
+        dz = aabb.min.z + nz * (aabb.max.z - aabb.min.z)
+        deltas = np.stack([dx, dy, dz], axis=-1)  # (blendShapeNum, totalVerts, 3)
+        lodDict = {}
+        for s in range(blendShapeNum):
+            nameIdx = s if s < len(remap) else 0
+            name = reMesh.rawNameList[remap[nameIdx]] if remap else f"BlendShape_{s}"
+            vOff = 0
+            for sm in subEntries:
+                cnt = getattr(sm, "vertCount", 0)
+                startIdx = getattr(sm, "subMeshVertexStartIndex", 0)
+                entry = BlendShape()
+                entry.blendShapeName = name
+                entry.deltas = deltas[s, vOff : vOff + cnt]
+                vOff += cnt
+                lodDict.setdefault(startIdx, []).append(entry)
+        result[lodIndex] = lodDict
+    return result
+
+
 def parseLODStructure(
     reMesh,
     targetLODList,
@@ -424,6 +701,7 @@ def parseLODStructure(
     faceBufferList,
     usedVertexOffsetDictList,
     blendShapeBuffer=None,
+    wildsBlendShapeDict=None,
 ):
     lodList = []
     currentBlendShapeOffset = 0
@@ -441,11 +719,21 @@ def parseLODStructure(
         # BLEND SHAPES - submesh
         currentBlendShapeNameIndex = 0
         currentBlendDeltaOffset = 0
-        if blendShapeLODData is not None:
+        # Wilds path: deltas were decoded up front from the streaming buffer tails.
+        # Use the precomputed per-LOD dict and skip the legacy (SF6/earlier) decode.
+        if wildsBlendShapeDict is not None:
+            blendShapeDict = wildsBlendShapeDict.get(lodIndex, {})
+        if blendShapeLODData is not None and wildsBlendShapeDict is None:
             blendShapeTags = set()  # Unused currently but there if needed in the future
             # identifier = [reMesh.lodHeader.lodGroupOffsetList[lodIndex]]
             # print(f"LOD Index {str(lodIndex)}")
-            bufferType = blendShapeNameMapping[blendShapeLODData.typing]
+            # Wilds uses typing=7, which is not an index into blendShapeNameMapping.
+            # Until the real decode is solved, fall back to the 8-byte short format so import
+            # does not crash; the diagnostics below are what we actually rely on for now.
+            if blendShapeLODData.typing < len(blendShapeNameMapping):
+                bufferType = blendShapeNameMapping[blendShapeLODData.typing]
+            else:
+                bufferType = "BlendShapeShort"
             bufferStride = blendShapeStrideDict[bufferType]
 
             # endOffset = currentBlendShapeOffset + (blendShapeLODData.vertCount*bufferStride)
@@ -950,6 +1238,17 @@ class ParsedREMesh:
                 print(
                     f"blendShape buffer start pos {str(reMesh.meshBufferHeader.vertexBufferOffset + blendShapeStartPos)}"
                 )
+                # _bsDeltaLocationDiagnostic(reMesh, vertexDictList)  # verbose RE diagnostic; re-enable if needed
+
+        # Decode MH Wilds-era packed blend shapes up front from the streaming buffer tails.
+        wildsBlendShapeDict = None
+        if (
+            reMesh.meshVersion in PACKED_BLEND_SHAPE_MESH_VERSIONS
+            and reMesh.blendShapeHeader is not None
+            and len(reMesh.blendShapeHeader.blendShapeList) > 0
+            and reMesh.blendShapeHeader.blendShapeList[0].typing == 7
+        ):
+            wildsBlendShapeDict = _decodeWildsBlendShapes(reMesh)
 
         # Parse Main Meshes
         if reMesh.lodHeader is not None and len(vertexDictList) != 0:
@@ -964,6 +1263,7 @@ class ParsedREMesh:
                 faceBufferList,
                 usedVertexOffsetDictList,
                 blendShapeBuffer,
+                wildsBlendShapeDict,
             )
             for i in range(len(self.mainMeshLODList)):
                 lodOffsetDict[reMesh.lodHeader.lodGroupOffsetList[i]] = (
