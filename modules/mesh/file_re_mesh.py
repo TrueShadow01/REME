@@ -1658,6 +1658,7 @@ class REMesh:
         self.materialNameRemapList = []
         self.boneNameRemapList = []
         self.blendShapeNameRemapList = []
+        self.blendShapeRegionBytes = b""  # MH Wilds: pre-serialized blend shape struct region
 
     def read(
         self, file, version, lodTarget=None, streamingBuffer=None
@@ -1843,6 +1844,15 @@ class REMesh:
                     f"ERROR IN OFFSET CALCULATION - aabbOffset - expected {self.fileHeader.aabbOffset}, actual {file.tell()}"
                 )
             self.boneBoundingBoxHeader.write(file)
+
+        # MH Wilds blend shape struct region (pre-serialized in ParsedREMeshToREMesh).
+        if self.fileHeader.blendShapesOffset and self.blendShapeRegionBytes:
+            if self.fileHeader.blendShapesOffset != file.tell():
+                print(
+                    f"ERROR IN OFFSET CALCULATION - blendShapesOffset - expected {self.fileHeader.blendShapesOffset}, actual {file.tell()}"
+                )
+            file.write(self.blendShapeRegionBytes)
+            file.write(b"\x00" * getPaddingAmount(file.tell(), 16))
 
         if self.fileHeader.meshOffset:
             if self.fileHeader.meshOffset != file.tell():
@@ -2191,6 +2201,133 @@ def packBlendShapeDeltas(deltaArray, aabb):
     yi = np.clip(np.round(norm[:, 1] * 1023), 0, 1023).astype(np.uint32)
     zi = np.clip(np.round(norm[:, 2] * 2047), 0, 2047).astype(np.uint32)
     return (xi | (yi << 11) | (zi << 21)).astype("<u4")
+
+
+def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
+    # Gather Blender-side blend shapes (read in blender_re_mesh) into per-LOD packed delta blocks.
+    # Returns (deltaBytes, perLodList, blendNames) or (None, None, None) if there are none.
+    # perLodList has one entry per main LOD (blendShapeNum=0 for LODs without blend shapes) so the
+    # BlendShapeData list stays index-aligned with the LODs.
+    perLodList = []
+    deltaChunks = []
+    blendNames = None
+    anyBlend = False
+    for lod in parsedMesh.mainMeshLODList:
+        blendSubmeshes = []
+        for viscon in lod.visconGroupList:
+            for sm in viscon.subMeshList:
+                if getattr(sm, "blendShapeList", None):
+                    blendSubmeshes.append(sm)
+        if not blendSubmeshes:
+            perLodList.append({"blendShapeNum": 0, "subEntries": [], "aabb": AABB()})
+            continue
+        anyBlend = True
+        names = [bs.blendShapeName for bs in blendSubmeshes[0].blendShapeList]
+        if blendNames is None:
+            blendNames = names
+        blendShapeNum = len(names)
+        allDeltaArrays = [
+            bs.deltas for sm in blendSubmeshes for bs in sm.blendShapeList
+        ]
+        aabb = computeBlendShapeAABB(allDeltaArrays)
+        subEntries = []
+        for sm in blendSubmeshes:
+            subData = parsedSubMeshToSubMeshDataDict.get(sm)
+            startIdx = subData.vertexStartIndex if subData is not None else 0
+            subEntries.append((startIdx, len(sm.vertexPosList)))
+        # Dense block, shape-major: for each shape concatenate its deltas across the submeshes.
+        packedList = []
+        for s in range(blendShapeNum):
+            shapeDeltas = np.concatenate(
+                [
+                    np.asarray(sm.blendShapeList[s].deltas, dtype=np.float64).reshape(
+                        -1, 3
+                    )
+                    for sm in blendSubmeshes
+                ],
+                axis=0,
+            )
+            packedList.append(packBlendShapeDeltas(shapeDeltas, aabb))
+        deltaChunks.append(np.concatenate(packedList).astype("<u4").tobytes())
+        perLodList.append(
+            {"blendShapeNum": blendShapeNum, "subEntries": subEntries, "aabb": aabb}
+        )
+    if not anyBlend:
+        return None, None, None
+    return b"".join(deltaChunks), perLodList, blendNames
+
+
+def serializeWildsBlendShapeRegion(perLodList, baseOffset):
+    # Serialize BlendShapeHeader + per-LOD BlendShapeData (+ BlendTarget/BlendSubMesh/AABB/blendS/
+    # blendSSList sub-blocks) into one contiguous byte block placed at absolute file offset
+    # baseOffset, computing every internal absolute offset. Mirrors the import struct layout.
+    count = len(perLodList)
+    headerSize = getPaddedPos(32 + count * 8, 16)
+    layout = []
+    cur = headerSize
+    for lod in perLodList:
+        nSub = len(lod["subEntries"])
+        dataStructOff = cur
+        cur += 48
+        targetOff = cur
+        cur += 16
+        subMeshOff = cur
+        cur += 16 * max(nSub, 0)
+        aabbOff = cur
+        cur += 32
+        blendSOff = cur
+        cur += 12
+        blendSSOff = cur
+        cur += lod["blendShapeNum"] * 4
+        cur = getPaddedPos(cur, 16)
+        layout.append(
+            (dataStructOff, targetOff, subMeshOff, aabbOff, blendSOff, blendSSOff)
+        )
+    buf = bytearray(cur)
+    struct.pack_into("<Q", buf, 0, count)
+    struct.pack_into("<Q", buf, 8, 0)  # zero
+    struct.pack_into("<Q", buf, 16, baseOffset + headerSize)  # mainOffset (decode ignores)
+    struct.pack_into("<Q", buf, 24, 0)  # hash
+    for i, lay in enumerate(layout):
+        struct.pack_into("<Q", buf, 32 + i * 8, baseOffset + lay[0])
+    for lod, lay in zip(perLodList, layout):
+        dOff, tOff, sOff, aOff, bsOff, bssOff = lay
+        nSub = len(lod["subEntries"])
+        blendShapeNum = lod["blendShapeNum"]
+        # BlendShapeData
+        struct.pack_into("<H", buf, dOff + 0, 1)  # targetCount
+        struct.pack_into("<H", buf, dOff + 2, 7)  # typing (Wilds packed)
+        struct.pack_into("<I", buf, dOff + 4, 0)  # unknFlag
+        struct.pack_into("<I", buf, dOff + 8, 0)  # padding1
+        struct.pack_into("<I", buf, dOff + 12, 0)  # padding2
+        struct.pack_into("<Q", buf, dOff + 16, baseOffset + tOff)  # dataOffset
+        struct.pack_into("<Q", buf, dOff + 24, baseOffset + aOff)  # aabbOffset
+        struct.pack_into("<Q", buf, dOff + 32, baseOffset + bsOff)  # blendSOffset
+        struct.pack_into("<Q", buf, dOff + 40, baseOffset + bssOff)  # blendSSOffset
+        # BlendTarget (SF6+)
+        struct.pack_into("<H", buf, tOff + 0, 0)  # blendSSIndex (decode ignores)
+        struct.pack_into("<H", buf, tOff + 2, blendShapeNum)
+        struct.pack_into("<H", buf, tOff + 4, 0)  # unkn0
+        struct.pack_into("<B", buf, tOff + 6, nSub)  # subMeshEntryCount
+        struct.pack_into("<B", buf, tOff + 7, 1)  # unkn2
+        struct.pack_into("<Q", buf, tOff + 8, baseOffset + sOff)  # subMeshEntryOffset
+        # BlendSubMesh list
+        for j, (startIdx, vertCount) in enumerate(lod["subEntries"]):
+            o = sOff + j * 16
+            struct.pack_into("<I", buf, o + 0, startIdx)  # subMeshVertexStartIndex
+            struct.pack_into("<I", buf, o + 4, 0)  # vertOffset
+            struct.pack_into("<I", buf, o + 8, vertCount)
+            struct.pack_into("<I", buf, o + 12, 0)  # paramUnkn3
+        # AABB (one, targetCount=1)
+        aabb = lod["aabb"]
+        struct.pack_into(
+            "<4f", buf, aOff + 0, aabb.min.x, aabb.min.y, aabb.min.z, 0.0
+        )
+        struct.pack_into(
+            "<4f", buf, aOff + 16, aabb.max.x, aabb.max.y, aabb.max.z, 0.0
+        )
+        # blendS (3 ints) and blendSSList (blendShapeNum ints) are zero; decode ignores them.
+    return bytes(buf)
 
 
 def WriteToFaceBuffer(bufferStream, faceList):
@@ -2629,7 +2766,18 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
             reMesh.rawNameList.append(bone.boneName)
             reMesh.boneNameRemapList.append(currentNameIndex)
             currentNameIndex += 1
-    # TODO Blend Shape Names Remap
+
+    # MH Wilds blend shape (shape key) export: gather packed deltas and register morph names.
+    # Blend shape names are appended after material/bone names; the remap maps each to its
+    # rawNameList index (the import reads them back as the trailing name entries).
+    blendDeltaBytes, blendPerLodList, blendNames = buildWildsBlendShapeExport(
+        parsedMesh, parsedSubMeshToSubMeshDataDict
+    )
+    if blendNames is not None:
+        for name in blendNames:
+            reMesh.blendShapeNameRemapList.append(len(reMesh.rawNameList))
+            reMesh.rawNameList.append(name)
+            currentNameIndex += 1
 
     reMesh.fileHeader.materialNameRemapOffset = currentOffset
     currentOffset = getPaddedPos(
@@ -2639,6 +2787,11 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
         reMesh.fileHeader.boneNameRemapOffset = currentOffset
         currentOffset = getPaddedPos(
             currentOffset + (len(reMesh.boneNameRemapList) * 2), 16
+        )
+    if blendNames is not None:
+        reMesh.fileHeader.blendShapeNameOffset = currentOffset
+        currentOffset = getPaddedPos(
+            currentOffset + (len(reMesh.blendShapeNameRemapList) * 2), 16
         )
 
     reMesh.fileHeader.nameOffsetsOffset = currentOffset
@@ -2656,6 +2809,16 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
         reMesh.boneBoundingBoxHeader.offset = currentOffset + sd.AABB_OFFSET
         currentOffset += (
             sd.AABB_OFFSET + reMesh.boneBoundingBoxHeader.count * sd.AABB_SIZE
+        )
+
+    # MH Wilds blend shape struct region (header + per-LOD data), placed before the mesh buffer.
+    if blendPerLodList is not None:
+        reMesh.fileHeader.blendShapesOffset = currentOffset
+        reMesh.blendShapeRegionBytes = serializeWildsBlendShapeRegion(
+            blendPerLodList, currentOffset
+        )
+        currentOffset = getPaddedPos(
+            currentOffset + len(reMesh.blendShapeRegionBytes), 16
         )
 
     # Mesh Buffer
@@ -2727,6 +2890,12 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
         currentBufferOffset += extraWeightBuffer.tell()
         reMesh.meshBufferHeader.vertexElementList.append(vertexElement)
         reMesh.meshBufferHeader.vertexBuffer.extend(extraWeightBuffer.getvalue())
+
+    # MH Wilds blend shape deltas live in the undeclared tail of the vertex buffer, immediately
+    # after the last declared vertex element (no padding before, matching the import math).
+    if blendDeltaBytes:
+        reMesh.meshBufferHeader.vertexBuffer.extend(blendDeltaBytes)
+        currentBufferOffset += len(blendDeltaBytes)
 
     reMesh.meshBufferHeader.faceBuffer = faceBuffer.getvalue()
     # print(len(reMesh.meshBufferHeader.faceBuffer))
@@ -2811,7 +2980,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
         unknFlag10,
         hasUnknFlag8=True,
         hasGroupPivot=reMesh.floatsHeader is not None,
-        hasBlendShape=reMesh.blendShapeHeader is not None,
+        hasBlendShape=blendPerLodList is not None,
         hasSkeleton=reMesh.skeletonHeader is not None,
         hasAABB=reMesh.boneBoundingBoxHeader is not None,
     )

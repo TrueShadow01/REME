@@ -438,39 +438,25 @@ def _decodeWildsBlendShapes(reMesh):
     mbh = reMesh.meshBufferHeader
     if bsh is None or mbh is None:
         return result
-    streamEntries = getattr(mbh, "streamingBufferHeaderList", [])
     remap = reMesh.blendShapeNameRemapList
-    for lodIndex, bsData in enumerate(bsh.blendShapeList):
-        if lodIndex >= len(streamEntries):
-            break
-        se = streamEntries[lodIndex]
-        if se.vertexBuffer is None or len(se.vertexElementList) < 2 or not bsData.blendTargetList:
-            continue
-        posElem = se.vertexElementList[0]
-        if not posElem.stride:
-            continue
-        meshVertCount = (
-            se.vertexElementList[1].posStartOffset - posElem.posStartOffset
-        ) // posElem.stride
-        lastElem = se.vertexElementList[-1]
-        endOfElements = lastElem.posStartOffset + meshVertCount * lastElem.stride
-        tail = se.vertexBuffer[endOfElements:]
+    streamEntries = getattr(mbh, "streamingBufferHeaderList", [])
+
+    def targetInfo(bsData):
+        if not bsData.blendTargetList:
+            return 0, 0, []
         bt = bsData.blendTargetList[0]
         subEntries = bt.subMeshEntryList if bt.subMeshEntryList else [bt]
         totalVerts = sum(getattr(sm, "vertCount", 0) for sm in subEntries)
-        blendShapeNum = bt.blendShapeNum
-        if totalVerts == 0 or blendShapeNum == 0:
-            continue
+        return bt.blendShapeNum, totalVerts, subEntries
+
+    def decodeBlock(tail, deltaStart, blendShapeNum, totalVerts, aabb, subEntries):
         deltaBytes = blendShapeNum * totalVerts * 4
-        # 16-align the start to skip the leading index/meshlet table and trailing padding.
-        deltaStart = ((len(tail) - deltaBytes) // 16) * 16
-        if deltaStart < 0:
-            continue
+        if deltaStart < 0 or deltaStart + deltaBytes > len(tail):
+            return None
         u32 = np.frombuffer(tail[deltaStart : deltaStart + deltaBytes], dtype="<I")
         if u32.size != blendShapeNum * totalVerts:
-            continue
+            return None
         u32 = u32.reshape(blendShapeNum, totalVerts)
-        aabb = bsData.aabbList[0]
         nx = (u32 & 0x7FF).astype(np.float32) / 2047.0
         ny = ((u32 >> 11) & 0x3FF).astype(np.float32) / 1023.0
         nz = ((u32 >> 21) & 0x7FF).astype(np.float32) / 2047.0
@@ -491,7 +477,54 @@ def _decodeWildsBlendShapes(reMesh):
                 entry.deltas = deltas[s, vOff : vOff + cnt]
                 vOff += cnt
                 lodDict.setdefault(startIdx, []).append(entry)
-        result[lodIndex] = lodDict
+        return lodDict
+
+    if streamEntries:
+        # Original game meshes: deltas are in each LOD's streaming vertex-buffer tail, after a
+        # leading index/meshlet table; 16-align the start to skip it (and any trailing padding).
+        for lodIndex, bsData in enumerate(bsh.blendShapeList):
+            if lodIndex >= len(streamEntries):
+                break
+            se = streamEntries[lodIndex]
+            if se.vertexBuffer is None or len(se.vertexElementList) < 2:
+                continue
+            blendShapeNum, totalVerts, subEntries = targetInfo(bsData)
+            if totalVerts == 0 or blendShapeNum == 0:
+                continue
+            posElem = se.vertexElementList[0]
+            if not posElem.stride:
+                continue
+            meshVertCount = (
+                se.vertexElementList[1].posStartOffset - posElem.posStartOffset
+            ) // posElem.stride
+            lastElem = se.vertexElementList[-1]
+            endOfElements = lastElem.posStartOffset + meshVertCount * lastElem.stride
+            tail = se.vertexBuffer[endOfElements:]
+            deltaStart = ((len(tail) - blendShapeNum * totalVerts * 4) // 16) * 16
+            lodDict = decodeBlock(
+                tail, deltaStart, blendShapeNum, totalVerts, bsData.aabbList[0], subEntries
+            )
+            if lodDict is not None:
+                result[lodIndex] = lodDict
+    else:
+        # Re-exported (non-streamed) meshes: deltas are dense blocks in the main vertex-buffer tail,
+        # one per LOD in order, contiguous. Read them back sequentially.
+        vel = mbh.vertexElementList
+        if len(vel) >= 2 and mbh.vertexBuffer is not None and vel[0].stride:
+            meshVertCount = (vel[1].posStartOffset - vel[0].posStartOffset) // vel[0].stride
+            endOfElements = vel[-1].posStartOffset + meshVertCount * vel[-1].stride
+            tail = mbh.vertexBuffer[endOfElements:]
+            cur = 0
+            for lodIndex, bsData in enumerate(bsh.blendShapeList):
+                blendShapeNum, totalVerts, subEntries = targetInfo(bsData)
+                if totalVerts == 0 or blendShapeNum == 0:
+                    continue
+                lodDict = decodeBlock(
+                    tail, cur, blendShapeNum, totalVerts, bsData.aabbList[0], subEntries
+                )
+                if lodDict is not None:
+                    result[lodIndex] = lodDict
+                cur += blendShapeNum * totalVerts * 4
     return result
 
 

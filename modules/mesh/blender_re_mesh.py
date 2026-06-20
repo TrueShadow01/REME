@@ -2081,6 +2081,17 @@ def exportREMeshFile(filePath, options):
                         basisCo = np.empty(skVertCount * 3, dtype=np.float32)
                         basisBlock.data.foreach_get("co", basisCo)
                         basisCo = basisCo.reshape(-1, 3)
+                        # DEBUG: is the exported (evaluated) vertex 0 the rest basis or basis+morphs?
+                        _evalCo0 = tuple(round(c, 5) for c in evaluatedSubMeshData.vertices[0].co)
+                        _basisGame0 = subMeshWorldMatrix @ basisBlock.data[0].co
+                        _basisGame0 = tuple(round(c, 5) for c in _basisGame0)
+                        print(
+                            f"[BS EXPORT DEBUG] {rawsubmesh.name} keyValues={[round(kb.value, 2) for kb in keyBlocks[:6]]} "
+                            f"showOnly={rawsubmesh.show_only_shape_key} activeIdx={rawsubmesh.active_shape_key_index}"
+                        )
+                        print(
+                            f"[BS EXPORT DEBUG] exportedVert0={_evalCo0} basisVert0(game)={_basisGame0}"
+                        )
                         for kb in keyBlocks[1:]:
                             skCo = np.empty(skVertCount * 3, dtype=np.float32)
                             kb.data.foreach_get("co", skCo)
