@@ -553,6 +553,7 @@ def importMesh(
             # print(deltas)
             sk = meshObj.shape_key_add(name=name)
             sk.interpolation = "KEY_LINEAR"
+            sk.value = 0.0  # Default to the rest basis so the mesh isn't shown as a morph mix
             print(f"mesh vertices: {len(meshObj.data.vertices)}")
             print(f"delta vertices: {len(deltas)}")
             if len(deltas) == len(meshObj.data.vertices):
@@ -1562,7 +1563,25 @@ def exportREMeshFile(filePath, options):
                 # Get copy of sub mesh with modifiers applied
                 # Creates copy of object so that solve repeated uvs and sharp edge splitting can be done and not affect the original mesh
                 cloneObj.name = "CLN_" + obj.name
+                # Evaluate the base mesh with shape key values muted so the exported positions and
+                # normals are the rest basis, not whatever morph mix the shape key sliders are set to.
+                mutedShapeKeyValues = None
+                if obj.data.shape_keys is not None and any(
+                    kb.value != 0.0 for kb in obj.data.shape_keys.key_blocks
+                ):
+                    mutedShapeKeyValues = [
+                        kb.value for kb in obj.data.shape_keys.key_blocks
+                    ]
+                    for kb in obj.data.shape_keys.key_blocks:
+                        kb.value = 0.0
+                    dg.update()
                 cloneObj.data = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
+                if mutedShapeKeyValues is not None:
+                    for kb, v in zip(
+                        obj.data.shape_keys.key_blocks, mutedShapeKeyValues
+                    ):
+                        kb.value = v
+                    dg.update()
                 clonedMeshCollection = getCollection("clonedMeshes")
                 clonedMeshCollection.objects.link(cloneObj)
 
@@ -2081,17 +2100,6 @@ def exportREMeshFile(filePath, options):
                         basisCo = np.empty(skVertCount * 3, dtype=np.float32)
                         basisBlock.data.foreach_get("co", basisCo)
                         basisCo = basisCo.reshape(-1, 3)
-                        # DEBUG: is the exported (evaluated) vertex 0 the rest basis or basis+morphs?
-                        _evalCo0 = tuple(round(c, 5) for c in evaluatedSubMeshData.vertices[0].co)
-                        _basisGame0 = subMeshWorldMatrix @ basisBlock.data[0].co
-                        _basisGame0 = tuple(round(c, 5) for c in _basisGame0)
-                        print(
-                            f"[BS EXPORT DEBUG] {rawsubmesh.name} keyValues={[round(kb.value, 2) for kb in keyBlocks[:6]]} "
-                            f"showOnly={rawsubmesh.show_only_shape_key} activeIdx={rawsubmesh.active_shape_key_index}"
-                        )
-                        print(
-                            f"[BS EXPORT DEBUG] exportedVert0={_evalCo0} basisVert0(game)={_basisGame0}"
-                        )
                         for kb in keyBlocks[1:]:
                             skCo = np.empty(skVertCount * 3, dtype=np.float32)
                             kb.data.foreach_get("co", skCo)
