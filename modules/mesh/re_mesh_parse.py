@@ -441,21 +441,31 @@ def _decodeWildsBlendShapes(reMesh):
     remap = reMesh.blendShapeNameRemapList
     streamEntries = getattr(mbh, "streamingBufferHeaderList", [])
 
-    def targetInfo(bsData):
-        if not bsData.blendTargetList:
-            return 0, 0, []
-        bt = bsData.blendTargetList[0]
-        subEntries = bt.subMeshEntryList if bt.subMeshEntryList else [bt]
-        totalVerts = sum(getattr(sm, "vertCount", 0) for sm in subEntries)
-        return bt.blendShapeNum, totalVerts, subEntries
+    def shapeName(globalIdx):
+        # Game meshes index names per-LOD (blendSSIndex); re-exports index per-occurrence. Names
+        # repeat per LOD, so the modulo keeps both correct even if the remap is one LOD's worth.
+        if remap:
+            ridx = remap[globalIdx % len(remap)]
+            if 0 <= ridx < len(reMesh.rawNameList):
+                return reMesh.rawNameList[ridx]
+        return f"BlendShape_{globalIdx}"
 
-    def decodeBlock(tail, deltaStart, blendShapeNum, totalVerts, aabb, subEntries):
+    def targetVertCount(bt):
+        subEntries = bt.subMeshEntryList if bt.subMeshEntryList else [bt]
+        return subEntries, sum(getattr(sm, "vertCount", 0) for sm in subEntries)
+
+    def decodeTarget(tail, cur, bt, aabb, lodDict):
+        # Decode one blend target's dense block at offset cur; returns its byte length.
+        subEntries, totalVerts = targetVertCount(bt)
+        blendShapeNum = bt.blendShapeNum
         deltaBytes = blendShapeNum * totalVerts * 4
-        if deltaStart < 0 or deltaStart + deltaBytes > len(tail):
-            return None
-        u32 = np.frombuffer(tail[deltaStart : deltaStart + deltaBytes], dtype="<I")
+        if blendShapeNum == 0 or totalVerts == 0:
+            return deltaBytes
+        if cur < 0 or cur + deltaBytes > len(tail):
+            return deltaBytes
+        u32 = np.frombuffer(tail[cur : cur + deltaBytes], dtype="<I")
         if u32.size != blendShapeNum * totalVerts:
-            return None
+            return deltaBytes
         u32 = u32.reshape(blendShapeNum, totalVerts)
         nx = (u32 & 0x7FF).astype(np.float32) / 2047.0
         ny = ((u32 >> 11) & 0x3FF).astype(np.float32) / 1023.0
@@ -464,10 +474,9 @@ def _decodeWildsBlendShapes(reMesh):
         dy = aabb.min.y + ny * (aabb.max.y - aabb.min.y)
         dz = aabb.min.z + nz * (aabb.max.z - aabb.min.z)
         deltas = np.stack([dx, dy, dz], axis=-1)  # (blendShapeNum, totalVerts, 3)
-        lodDict = {}
+        ssBase = getattr(bt, "blendSSIndex", 0)
         for s in range(blendShapeNum):
-            nameIdx = s if s < len(remap) else 0
-            name = reMesh.rawNameList[remap[nameIdx]] if remap else f"BlendShape_{s}"
+            name = shapeName(ssBase + s)
             vOff = 0
             for sm in subEntries:
                 cnt = getattr(sm, "vertCount", 0)
@@ -477,19 +486,28 @@ def _decodeWildsBlendShapes(reMesh):
                 entry.deltas = deltas[s, vOff : vOff + cnt]
                 vOff += cnt
                 lodDict.setdefault(startIdx, []).append(entry)
-        return lodDict
+        return deltaBytes
+
+    def lodTotalDeltaBytes(bsData):
+        total = 0
+        for bt in bsData.blendTargetList:
+            _, totalVerts = targetVertCount(bt)
+            total += bt.blendShapeNum * totalVerts * 4
+        return total
+
+    def targetAABB(bsData, ti):
+        if ti < len(bsData.aabbList):
+            return bsData.aabbList[ti]
+        return bsData.aabbList[0] if bsData.aabbList else AABB()
 
     if streamEntries:
-        # Original game meshes: deltas are in each LOD's streaming vertex-buffer tail, after a
-        # leading index/meshlet table; 16-align the start to skip it (and any trailing padding).
+        # Original game meshes: each LOD's targets are packed after a leading index/meshlet table in
+        # that LOD's streaming vertex-buffer tail; 16-align the start to skip it (and trailing pad).
         for lodIndex, bsData in enumerate(bsh.blendShapeList):
-            if lodIndex >= len(streamEntries):
-                break
+            if lodIndex >= len(streamEntries) or not bsData.blendTargetList:
+                continue
             se = streamEntries[lodIndex]
             if se.vertexBuffer is None or len(se.vertexElementList) < 2:
-                continue
-            blendShapeNum, totalVerts, subEntries = targetInfo(bsData)
-            if totalVerts == 0 or blendShapeNum == 0:
                 continue
             posElem = se.vertexElementList[0]
             if not posElem.stride:
@@ -500,15 +518,15 @@ def _decodeWildsBlendShapes(reMesh):
             lastElem = se.vertexElementList[-1]
             endOfElements = lastElem.posStartOffset + meshVertCount * lastElem.stride
             tail = se.vertexBuffer[endOfElements:]
-            deltaStart = ((len(tail) - blendShapeNum * totalVerts * 4) // 16) * 16
-            lodDict = decodeBlock(
-                tail, deltaStart, blendShapeNum, totalVerts, bsData.aabbList[0], subEntries
-            )
-            if lodDict is not None:
+            cur = ((len(tail) - lodTotalDeltaBytes(bsData)) // 16) * 16
+            lodDict = {}
+            for ti, bt in enumerate(bsData.blendTargetList):
+                cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict)
+            if lodDict:
                 result[lodIndex] = lodDict
     else:
-        # Re-exported (non-streamed) meshes: deltas are dense blocks in the main vertex-buffer tail,
-        # one per LOD in order, contiguous. Read them back sequentially.
+        # Re-exported (non-streamed) meshes: targets are dense blocks in the main vertex-buffer tail,
+        # one per (LOD, target) in order, contiguous. Read them back sequentially.
         vel = mbh.vertexElementList
         if len(vel) >= 2 and mbh.vertexBuffer is not None and vel[0].stride:
             meshVertCount = (vel[1].posStartOffset - vel[0].posStartOffset) // vel[0].stride
@@ -516,15 +534,11 @@ def _decodeWildsBlendShapes(reMesh):
             tail = mbh.vertexBuffer[endOfElements:]
             cur = 0
             for lodIndex, bsData in enumerate(bsh.blendShapeList):
-                blendShapeNum, totalVerts, subEntries = targetInfo(bsData)
-                if totalVerts == 0 or blendShapeNum == 0:
-                    continue
-                lodDict = decodeBlock(
-                    tail, cur, blendShapeNum, totalVerts, bsData.aabbList[0], subEntries
-                )
-                if lodDict is not None:
+                lodDict = {}
+                for ti, bt in enumerate(bsData.blendTargetList):
+                    cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict)
+                if lodDict:
                     result[lodIndex] = lodDict
-                cur += blendShapeNum * totalVerts * 4
     return result
 
 

@@ -2204,54 +2204,42 @@ def packBlendShapeDeltas(deltaArray, aabb):
 
 
 def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
-    # Gather Blender-side blend shapes (read in blender_re_mesh) into per-LOD packed delta blocks.
-    # Returns (deltaBytes, perLodList, blendNames) or (None, None, None) if there are none.
-    # perLodList has one entry per main LOD (blendShapeNum=0 for LODs without blend shapes) so the
-    # BlendShapeData list stays index-aligned with the LODs.
+    # Gather Blender-side blend shapes into per-LOD blend targets. Each submesh that has shape keys
+    # becomes its own blend target (its own blendShapeNum / AABB / name range), so submeshes with
+    # different shape key sets are handled. Returns (deltaBytes, perLodList, blendNames) where
+    # blendNames is the flat per-occurrence name list (target.blendSSIndex offsets into it), or
+    # (None, None, None) if there are no shape keys anywhere. perLodList has one entry per main LOD
+    # (possibly with an empty target list) so the BlendShapeData list stays index-aligned with LODs.
     perLodList = []
     deltaChunks = []
-    blendNames = None
+    blendNames = []
     anyBlend = False
     for lod in parsedMesh.mainMeshLODList:
-        blendSubmeshes = []
+        targets = []
         for viscon in lod.visconGroupList:
             for sm in viscon.subMeshList:
-                if getattr(sm, "blendShapeList", None):
-                    blendSubmeshes.append(sm)
-        if not blendSubmeshes:
-            perLodList.append({"blendShapeNum": 0, "subEntries": [], "aabb": AABB()})
-            continue
-        anyBlend = True
-        names = [bs.blendShapeName for bs in blendSubmeshes[0].blendShapeList]
-        if blendNames is None:
-            blendNames = names
-        blendShapeNum = len(names)
-        allDeltaArrays = [
-            bs.deltas for sm in blendSubmeshes for bs in sm.blendShapeList
-        ]
-        aabb = computeBlendShapeAABB(allDeltaArrays)
-        subEntries = []
-        for sm in blendSubmeshes:
-            subData = parsedSubMeshToSubMeshDataDict.get(sm)
-            startIdx = subData.vertexStartIndex if subData is not None else 0
-            subEntries.append((startIdx, len(sm.vertexPosList)))
-        # Dense block, shape-major: for each shape concatenate its deltas across the submeshes.
-        packedList = []
-        for s in range(blendShapeNum):
-            shapeDeltas = np.concatenate(
-                [
-                    np.asarray(sm.blendShapeList[s].deltas, dtype=np.float64).reshape(
-                        -1, 3
-                    )
-                    for sm in blendSubmeshes
-                ],
-                axis=0,
-            )
-            packedList.append(packBlendShapeDeltas(shapeDeltas, aabb))
-        deltaChunks.append(np.concatenate(packedList).astype("<u4").tobytes())
-        perLodList.append(
-            {"blendShapeNum": blendShapeNum, "subEntries": subEntries, "aabb": aabb}
-        )
+                shapes = getattr(sm, "blendShapeList", None)
+                if not shapes:
+                    continue
+                anyBlend = True
+                blendShapeNum = len(shapes)
+                aabb = computeBlendShapeAABB([bs.deltas for bs in shapes])
+                subData = parsedSubMeshToSubMeshDataDict.get(sm)
+                startIdx = subData.vertexStartIndex if subData is not None else 0
+                ssIndex = len(blendNames)
+                for bs in shapes:
+                    blendNames.append(bs.blendShapeName)
+                packed = [packBlendShapeDeltas(bs.deltas, aabb) for bs in shapes]
+                deltaChunks.append(np.concatenate(packed).astype("<u4").tobytes())
+                targets.append(
+                    {
+                        "blendShapeNum": blendShapeNum,
+                        "subEntries": [(startIdx, len(sm.vertexPosList))],
+                        "aabb": aabb,
+                        "blendSSIndex": ssIndex,
+                    }
+                )
+        perLodList.append({"targets": targets})
     if not anyBlend:
         return None, None, None
     return b"".join(deltaChunks), perLodList, blendNames
@@ -2259,29 +2247,41 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
 
 def serializeWildsBlendShapeRegion(perLodList, baseOffset):
     # Serialize BlendShapeHeader + per-LOD BlendShapeData (+ BlendTarget/BlendSubMesh/AABB/blendS/
-    # blendSSList sub-blocks) into one contiguous byte block placed at absolute file offset
-    # baseOffset, computing every internal absolute offset. Mirrors the import struct layout.
+    # blendSSList sub-blocks) into one contiguous byte block at absolute file offset baseOffset,
+    # computing every internal absolute offset. Mirrors the import struct layout, with one or more
+    # blend targets per LOD. The importer reads blendS/blendSSList immediately after the AABB list,
+    # so those must be contiguous with it.
     count = len(perLodList)
     headerSize = getPaddedPos(32 + count * 8, 16)
     layout = []
     cur = headerSize
     for lod in perLodList:
-        nSub = len(lod["subEntries"])
+        targets = lod["targets"]
+        nTargets = len(targets)
         dataStructOff = cur
         cur += 48
-        targetOff = cur
-        cur += 16
-        subMeshOff = cur
-        cur += 16 * max(nSub, 0)
+        targetListOff = cur
+        cur += 16 * nTargets
+        subOffsets = []
+        for t in targets:
+            subOffsets.append(cur)
+            cur += 16 * len(t["subEntries"])
         aabbOff = cur
-        cur += 32
-        blendSOff = cur
+        cur += 32 * nTargets
+        blendSOff = cur  # blendS + blendSSList must follow the AABB list (read sequentially)
         cur += 12
         blendSSOff = cur
-        cur += lod["blendShapeNum"] * 4
+        cur += sum(t["blendShapeNum"] for t in targets) * 4
         cur = getPaddedPos(cur, 16)
         layout.append(
-            (dataStructOff, targetOff, subMeshOff, aabbOff, blendSOff, blendSSOff)
+            {
+                "dataStructOff": dataStructOff,
+                "targetListOff": targetListOff,
+                "subOffsets": subOffsets,
+                "aabbOff": aabbOff,
+                "blendSOff": blendSOff,
+                "blendSSOff": blendSSOff,
+            }
         )
     buf = bytearray(cur)
     struct.pack_into("<Q", buf, 0, count)
@@ -2289,44 +2289,40 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
     struct.pack_into("<Q", buf, 16, baseOffset + headerSize)  # mainOffset (decode ignores)
     struct.pack_into("<Q", buf, 24, 0)  # hash
     for i, lay in enumerate(layout):
-        struct.pack_into("<Q", buf, 32 + i * 8, baseOffset + lay[0])
+        struct.pack_into("<Q", buf, 32 + i * 8, baseOffset + lay["dataStructOff"])
     for lod, lay in zip(perLodList, layout):
-        dOff, tOff, sOff, aOff, bsOff, bssOff = lay
-        nSub = len(lod["subEntries"])
-        blendShapeNum = lod["blendShapeNum"]
-        # BlendShapeData
-        struct.pack_into("<H", buf, dOff + 0, 1)  # targetCount
-        struct.pack_into("<H", buf, dOff + 2, 7)  # typing (Wilds packed)
-        struct.pack_into("<I", buf, dOff + 4, 0)  # unknFlag
-        struct.pack_into("<I", buf, dOff + 8, 0)  # padding1
-        struct.pack_into("<I", buf, dOff + 12, 0)  # padding2
-        struct.pack_into("<Q", buf, dOff + 16, baseOffset + tOff)  # dataOffset
-        struct.pack_into("<Q", buf, dOff + 24, baseOffset + aOff)  # aabbOffset
-        struct.pack_into("<Q", buf, dOff + 32, baseOffset + bsOff)  # blendSOffset
-        struct.pack_into("<Q", buf, dOff + 40, baseOffset + bssOff)  # blendSSOffset
-        # BlendTarget (SF6+)
-        struct.pack_into("<H", buf, tOff + 0, 0)  # blendSSIndex (decode ignores)
-        struct.pack_into("<H", buf, tOff + 2, blendShapeNum)
-        struct.pack_into("<H", buf, tOff + 4, 0)  # unkn0
-        struct.pack_into("<B", buf, tOff + 6, nSub)  # subMeshEntryCount
-        struct.pack_into("<B", buf, tOff + 7, 1)  # unkn2
-        struct.pack_into("<Q", buf, tOff + 8, baseOffset + sOff)  # subMeshEntryOffset
-        # BlendSubMesh list
-        for j, (startIdx, vertCount) in enumerate(lod["subEntries"]):
-            o = sOff + j * 16
-            struct.pack_into("<I", buf, o + 0, startIdx)  # subMeshVertexStartIndex
-            struct.pack_into("<I", buf, o + 4, 0)  # vertOffset
-            struct.pack_into("<I", buf, o + 8, vertCount)
-            struct.pack_into("<I", buf, o + 12, 0)  # paramUnkn3
-        # AABB (one, targetCount=1)
-        aabb = lod["aabb"]
-        struct.pack_into(
-            "<4f", buf, aOff + 0, aabb.min.x, aabb.min.y, aabb.min.z, 0.0
-        )
-        struct.pack_into(
-            "<4f", buf, aOff + 16, aabb.max.x, aabb.max.y, aabb.max.z, 0.0
-        )
-        # blendS (3 ints) and blendSSList (blendShapeNum ints) are zero; decode ignores them.
+        targets = lod["targets"]
+        nTargets = len(targets)
+        d = lay["dataStructOff"]
+        struct.pack_into("<H", buf, d + 0, nTargets)  # targetCount
+        struct.pack_into("<H", buf, d + 2, 7)  # typing (Wilds packed)
+        struct.pack_into("<I", buf, d + 4, 0)  # unknFlag
+        struct.pack_into("<I", buf, d + 8, 0)  # padding1
+        struct.pack_into("<I", buf, d + 12, 0)  # padding2
+        struct.pack_into("<Q", buf, d + 16, baseOffset + lay["targetListOff"])  # dataOffset
+        struct.pack_into("<Q", buf, d + 24, baseOffset + lay["aabbOff"])  # aabbOffset
+        struct.pack_into("<Q", buf, d + 32, baseOffset + lay["blendSOff"])  # blendSOffset
+        struct.pack_into("<Q", buf, d + 40, baseOffset + lay["blendSSOff"])  # blendSSOffset
+        for ti, t in enumerate(targets):
+            tOff = lay["targetListOff"] + ti * 16
+            sOff = lay["subOffsets"][ti]
+            struct.pack_into("<H", buf, tOff + 0, t["blendSSIndex"])
+            struct.pack_into("<H", buf, tOff + 2, t["blendShapeNum"])
+            struct.pack_into("<H", buf, tOff + 4, 0)  # unkn0
+            struct.pack_into("<B", buf, tOff + 6, len(t["subEntries"]))  # subMeshEntryCount
+            struct.pack_into("<B", buf, tOff + 7, 1)  # unkn2
+            struct.pack_into("<Q", buf, tOff + 8, baseOffset + sOff)  # subMeshEntryOffset
+            for j, (startIdx, vertCount) in enumerate(t["subEntries"]):
+                o = sOff + j * 16
+                struct.pack_into("<I", buf, o + 0, startIdx)  # subMeshVertexStartIndex
+                struct.pack_into("<I", buf, o + 4, 0)  # vertOffset
+                struct.pack_into("<I", buf, o + 8, vertCount)
+                struct.pack_into("<I", buf, o + 12, 0)  # paramUnkn3
+            aabb = t["aabb"]
+            ao = lay["aabbOff"] + ti * 32
+            struct.pack_into("<4f", buf, ao + 0, aabb.min.x, aabb.min.y, aabb.min.z, 0.0)
+            struct.pack_into("<4f", buf, ao + 16, aabb.max.x, aabb.max.y, aabb.max.z, 0.0)
+        # blendS (3 ints) and blendSSList (sum of blendShapeNum ints) are zero; decode ignores them.
     return bytes(buf)
 
 
