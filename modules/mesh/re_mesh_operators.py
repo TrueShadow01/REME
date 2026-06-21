@@ -1,5 +1,6 @@
 # Author: NSA Cloud
 import os
+import struct
 
 import bpy
 from bpy.props import (
@@ -715,3 +716,201 @@ class WM_OT_QuickBatchExport(Operator):
     def execute(self, context):
         bpy.ops.re_mesh_cm.batch_exporter()
         return {"FINISHED"}
+
+
+def _findStreamingCompanion(filepath):
+    # Mirror of readREMesh: streaming file lives at the parallel natives\STM\streaming\... path,
+    # or a sibling "streaming" folder for loose files.
+    paths = splitNativesPath(filepath)
+    if paths is not None:
+        candidate = os.path.join(paths[0], "streaming", paths[1])
+        if os.path.isfile(candidate):
+            return candidate
+    folder, name = os.path.split(filepath)
+    candidate = os.path.join(folder, "streaming", name)
+    if os.path.isfile(candidate):
+        return candidate
+    return None
+
+
+def dumpMeshStructure(filepath):
+    # Debug: parse a MH Wilds .mesh (base + streaming companion) and print its full structure:
+    # header offsets, streamingInfo, per-streaming-entry buffer sizes + blend-delta tail, and the
+    # blend shape structs. Pure struct parsing (Wilds / >= ONI2 header layout).
+    P = print
+    P("=" * 70)
+    P(f"[DUMP] {filepath}")
+    try:
+        d = open(filepath, "rb").read()
+    except Exception as err:
+        P(f"[DUMP] failed to open: {err}")
+        return
+    if len(d) < 16 or struct.unpack_from("<I", d, 0)[0] != 1213416781:
+        P("[DUMP] not a .mesh file (bad magic)")
+        return
+
+    def u8(o):
+        return d[o]
+
+    def u16(o):
+        return struct.unpack_from("<H", d, o)[0]
+
+    def s16(o):
+        return struct.unpack_from("<h", d, o)[0]
+
+    def u32(o):
+        return struct.unpack_from("<I", d, o)[0]
+
+    def u64(o):
+        return struct.unpack_from("<Q", d, o)[0]
+
+    def f32(o):
+        return struct.unpack_from("<f", d, o)[0]
+
+    def pad16(x):
+        return x + (-x % 16)
+
+    version = u32(4)
+    P(f"[DUMP] version={version} baseFileSize(decl/actual)={u32(8)}/{len(d)} nameCount={s16(20)} contentFlag={bin(u16(22))}")
+    if version < 240704828:
+        P("[DUMP] Pre-Wilds header layout not supported by this debug parser; aborting.")
+        return
+
+    # File header offsets (Wilds / >= ONI2 branch)
+    flds = [
+        "verticesOffset", "meshGroupOffset", "shadowMeshGroupOffset",
+        "occlusionMeshGroupOffset", "normalRecalcOffset", "blendShapesOffset",
+        "meshOffset", "sf6unkn1", "floatsOffset", "aabbOffset", "skeletonOffset",
+        "materialNameRemapOffset", "boneNameRemapOffset", "blendShapeNameOffset",
+        "nameOffsetsOffset", "streamingInfoOffset", "sf6unkn4",
+    ]
+    H = {n: u64(40 + i * 8) for i, n in enumerate(flds)}
+    for n in flds:
+        if H[n]:
+            P(f"[DUMP]   {n} = {H[n]}")
+
+    strmPath = _findStreamingCompanion(filepath)
+    strmSize = os.path.getsize(strmPath) if strmPath else None
+    P(f"[DUMP] streaming companion: {strmPath} (size={strmSize})")
+
+    # Streaming info
+    entryCount = 0
+    streamInfo = []
+    if H["streamingInfoOffset"]:
+        sio = H["streamingInfoOffset"]
+        entryCount = u32(sio)
+        entryOff = u64(sio + 8)
+        P(f"[DUMP] STREAMING INFO: entryCount={entryCount}")
+        for i in range(entryCount):
+            bs = u32(entryOff + i * 8)
+            bl = u32(entryOff + i * 8 + 4)
+            streamInfo.append((bs, bl))
+            P(f"[DUMP]   streamInfo[{i}] bufferStart={bs} bufferLength={bl}")
+
+    # Mesh buffer header (SF6+)
+    mo = H["meshOffset"]
+    if mo:
+        vbo = u64(mo + 8)
+        totalBufferSize = u32(mo + 24)
+        vertexBufferSize = u32(mo + 28)
+        mainVEC = u16(mo + 32)
+        VEC = u16(mo + 34)
+        streamingVEO = u64(mo + 64)
+        P(f"[DUMP] MESH BUFFER HEADER: vertexBufferSize(base inline)={vertexBufferSize} totalBufferSize={totalBufferSize} mainVEC={mainVEC} VEC={VEC} streamingVertexElementOffset={streamingVEO}")
+
+        # Streaming buffer header entries (at meshOffset + 80), 64 bytes each
+        eo = mo + 80
+        elemBlock = pad16(8 * mainVEC)
+        for i in range(entryCount):
+            b = eo + i * 64
+            tot = u32(b + 8)
+            vbl = u32(b + 12)
+            unpad = u32(b + 20)
+            # Parse this entry's vertex elements to find where the blend-delta tail begins.
+            veBase = streamingVEO + i * elemBlock
+            elems = []
+            for j in range(mainVEC):
+                eb = veBase + j * 8
+                elems.append((u16(eb), u16(eb + 2), u32(eb + 4)))  # typing, stride, posStartOffset
+            vertCount = 0
+            endOfElements = 0
+            if len(elems) >= 2 and elems[0][1]:
+                vertCount = (elems[1][2] - elems[0][2]) // elems[0][1]
+                last = elems[-1]
+                endOfElements = last[2] + vertCount * last[1]
+            blendTail = vbl - endOfElements
+            P(f"[DUMP]   entry[{i}] totalBufferSize={tot} vertexBufferLength={vbl} unpaddedBufferSize={unpad} vertCount={vertCount} endOfElements={endOfElements} BLEND_TAIL={blendTail} faces={tot - vbl}")
+
+    # LOD / mesh-group structure: which submesh reads from which vertex buffer (vbi) and where.
+    mgo = H["meshGroupOffset"]
+    if mgo:
+        lodGroupCount = u8(mgo)
+        materialCount = u8(mgo + 1)
+        totalMeshCount = u16(mgo + 4)
+        lodOffListStart = mgo + 8 + 16 + 32 + 8  # after counts + sphere(16) + bbox(32) + offsetOffset(8)
+        lodOffs = [u64(lodOffListStart + i * 8) for i in range(lodGroupCount)]
+        P(f"[DUMP] LOD STRUCTURE: lodGroupCount={lodGroupCount} materialCount={materialCount} totalMeshCount={totalMeshCount}")
+        for li, lo in enumerate(lodOffs):
+            mgCount = u8(lo)
+            distance = f32(lo + 4)
+            mgOffs = [u64(lo + 16 + i * 8) for i in range(mgCount)]
+            P(f"[DUMP]   LOD[{li}] meshGroupCount={mgCount} distance={round(distance, 4)}")
+            for mgoff in mgOffs:
+                visconID = u8(mgoff)
+                meshCount = u8(mgoff + 1)
+                for si in range(meshCount):
+                    sb = mgoff + 16 + si * 32
+                    P(f"[DUMP]     grp{visconID} sub{si}: mat={u8(sb)} vbi={u8(sb + 2)} vertStart={u32(sb + 16)} faceStart={u32(sb + 12)} faceCount={u32(sb + 8)} streamingOffsetBytes={u32(sb + 20)}")
+
+    # Blend shape structs
+    bso = H["blendShapesOffset"]
+    if bso:
+        count = u64(bso)
+        # version >= ONI2: zero, mainOffset, hash
+        listStart = bso + 32
+        offs = [u64(listStart + i * 8) for i in range(count)]
+        P(f"[DUMP] BLEND SHAPE HEADER: count(LODs)={count}")
+        for li, off in enumerate(offs):
+            targetCount = u16(off)
+            typing = u16(off + 2)
+            dataOff = u64(off + 16)
+            aabbOff = u64(off + 24)
+            P(f"[DUMP]   BlendShapeData[{li}] targetCount={targetCount} typing={typing}")
+            for ti in range(targetCount):
+                t = dataOff + ti * 16
+                ssIdx = u16(t)
+                bsNum = u16(t + 2)
+                subCnt = u8(t + 6)
+                subOff = u64(t + 8)
+                subs = []
+                for j in range(subCnt):
+                    so = subOff + j * 16
+                    subs.append((u32(so), u32(so + 8)))  # startIndex, vertCount
+                a = aabbOff + ti * 32
+                aabbMax = (round(f32(a + 16), 5), round(f32(a + 20), 5), round(f32(a + 24), 5))
+                P(f"[DUMP]     target[{ti}] blendSSIndex={ssIdx} blendShapeNum={bsNum} subMeshEntries={subs} aabbMax={aabbMax}")
+    P("=" * 70)
+
+
+class WM_OT_DumpMeshStructure(Operator):
+    bl_label = "Dump RE Mesh Structure (Debug)"
+    bl_idname = "re_mesh_cm.dump_mesh_structure"
+    bl_description = (
+        "Parse a .mesh file (base + streaming companion) and print its full structure to the "
+        "system console. Used to compare original vs exported meshes while developing streaming export"
+    )
+
+    filepath: StringProperty(subtype="FILE_PATH")
+    filter_glob: StringProperty(default="*.mesh*", options={"HIDDEN"})
+
+    def execute(self, context):
+        if not self.filepath or not os.path.isfile(self.filepath):
+            self.report({"ERROR"}, "No valid .mesh file selected")
+            return {"CANCELLED"}
+        dumpMeshStructure(self.filepath)
+        self.report({"INFO"}, "Dumped mesh structure to system console (Window > Toggle System Console)")
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}

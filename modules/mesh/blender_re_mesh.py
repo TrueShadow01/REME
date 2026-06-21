@@ -19,6 +19,7 @@ from ..mdf.file_re_mdf import readMDF
 from ..sfur.blender_re_sfur import findSFurPathFromMeshPath, importSFurFile
 from .file_re_mesh import (
     AABB,
+    EXPORT_WILDS_BLEND_SHAPES,
     Matrix4x4,
     ParsedREMeshToREMesh,
     Sphere,
@@ -1565,9 +1566,12 @@ def exportREMeshFile(filePath, options):
                 cloneObj.name = "CLN_" + obj.name
                 # Evaluate the base mesh with shape key values muted so the exported positions and
                 # normals are the rest basis, not whatever morph mix the shape key sliders are set to.
+                # Only when blend-shape export is active, so the core (no-blend) path is untouched.
                 mutedShapeKeyValues = None
-                if obj.data.shape_keys is not None and any(
-                    kb.value != 0.0 for kb in obj.data.shape_keys.key_blocks
+                if (
+                    EXPORT_WILDS_BLEND_SHAPES
+                    and obj.data.shape_keys is not None
+                    and any(kb.value != 0.0 for kb in obj.data.shape_keys.key_blocks)
                 ):
                     mutedShapeKeyValues = [
                         kb.value for kb in obj.data.shape_keys.key_blocks
@@ -2085,7 +2089,8 @@ def exportREMeshFile(filePath, options):
                 # object and store per-vertex deltas in game space, matching the exported vertex
                 # order (evaluatedSubMeshData.vertices[i]). Encoded later in ParsedREMeshToREMesh.
                 if (
-                    meshVersion in PACKED_BLEND_SHAPE_MESH_VERSIONS
+                    EXPORT_WILDS_BLEND_SHAPES
+                    and meshVersion in PACKED_BLEND_SHAPE_MESH_VERSIONS
                     and options.get("exportBlendShapes", True)
                     and rawsubmesh.data.shape_keys is not None
                     and len(rawsubmesh.data.shape_keys.key_blocks) > 1

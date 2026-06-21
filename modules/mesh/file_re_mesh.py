@@ -60,6 +60,10 @@ IMPORT_BLEND_SHAPES = False  # Legacy (SF6 and earlier) blend shape import is st
 # and corrupts the base file. With this off, shape-key meshes export as a clean base mesh.
 EXPORT_WILDS_BLEND_SHAPES = False
 
+# Temporary: prints a preview of the per-LOD streaming split during export (no file changes) so the
+# split logic can be validated against the original via the Dump button before the write is wired.
+DEBUG_STREAMING_BUILD = True
+
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
 # always imported regardless of IMPORT_BLEND_SHAPES. Other games stay gated by the flag above.
 WILDS_PACKED_BLEND_SHAPE_FILE_VERSIONS = frozenset(
@@ -1664,6 +1668,7 @@ class REMesh:
         self.boneNameRemapList = []
         self.blendShapeNameRemapList = []
         self.blendShapeRegionBytes = b""  # MH Wilds: pre-serialized blend shape struct region
+        self.streamingBytes = b""  # MH Wilds: bytes for the parallel streaming companion file
 
     def read(
         self, file, version, lodTarget=None, streamingBuffer=None
@@ -2215,6 +2220,9 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
     # blendNames is the flat per-occurrence name list (target.blendSSIndex offsets into it), or
     # (None, None, None) if there are no shape keys anywhere. perLodList has one entry per main LOD
     # (possibly with an empty target list) so the BlendShapeData list stays index-aligned with LODs.
+    if not EXPORT_WILDS_BLEND_SHAPES:
+        # Disabled until the streaming-file write path exists (see the flag's definition).
+        return None, None, None
     perLodList = []
     deltaChunks = []
     blendNames = []
@@ -2388,6 +2396,44 @@ class sizeData:
             self.VERTEX_ELEMENT_OFFSET = 96
 
         self.VERTEX_ELEMENT_SIZE = 8
+
+
+def _debugStreamingSplit(reMesh):
+    # Preview of the per-LOD streaming split: which LOD goes to the base buffer vs a streaming entry,
+    # and each entry's geometry/face byte sizes. Compared against the original face via the Dump
+    # button to validate the split before the streaming write is wired in. No file changes.
+    if not DEBUG_STREAMING_BUILD or reMesh.lodHeader is None:
+        return
+    mbh = reMesh.meshBufferHeader
+    if mbh is None or not mbh.vertexElementList:
+        return
+    vbytesPerVert = sum(ve.stride for ve in mbh.vertexElementList)
+    indexSize = 4 if reMesh.lodHeader.has32BitIndexBuffer else 2
+    lodGroups = reMesh.lodHeader.lodGroupList
+    nLod = len(lodGroups)
+    print("[STRM] ===== STREAMING SPLIT PREVIEW =====")
+    print(
+        f"[STRM] numLODs={nLod} vertexBytesPerVertex={vbytesPerVert} indexSize={indexSize} "
+        f"elements={[(ve.typing, ve.stride) for ve in mbh.vertexElementList]}"
+    )
+    for li, lodGroup in enumerate(lodGroups):
+        if not lodGroup.meshGroupList or not lodGroup.meshGroupList[0].vertexInfoList:
+            continue
+        firstSub = lodGroup.meshGroupList[0].vertexInfoList[0]
+        vStart = firstSub.vertexStartIndex
+        fStart = firstSub.faceStartIndex
+        vCount = sum(mg.vertexCount for mg in lodGroup.meshGroupList)
+        fCount = sum(mg.faceCount for mg in lodGroup.meshGroupList)
+        geomBytes = vCount * vbytesPerVert
+        faceBytes = fCount * indexSize
+        isBase = li == nLod - 1
+        vbi = 0 if isBase else li + 1
+        print(
+            f"[STRM] LOD{li} {'BASE(vbi=0)' if isBase else f'STREAM entry{li}(vbi={vbi})'}: "
+            f"globalVertStart={vStart} vCount={vCount} geomBytes={geomBytes} globalFaceStart={fStart} "
+            f"fCount={fCount} faceBytes={faceBytes} entryTotal~={getPaddedPos(geomBytes + faceBytes, 16)}"
+        )
+    print("[STRM] ===================================")
 
 
 def ParsedREMeshToREMesh(parsedMesh, meshVersion):
@@ -2771,14 +2817,10 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     # MH Wilds blend shape (shape key) export: gather packed deltas and register morph names.
     # Blend shape names are appended after material/bone names; the remap maps each to its
     # rawNameList index (the import reads them back as the trailing name entries).
-    # Gated OFF: the single-file approach writes deltas the engine can't build (D3D crash) and
-    # corrupts the base file. Re-enabled once the proper streaming-file write path is implemented.
-    if EXPORT_WILDS_BLEND_SHAPES:
-        blendDeltaBytes, blendPerLodList, blendNames = buildWildsBlendShapeExport(
-            parsedMesh, parsedSubMeshToSubMeshDataDict
-        )
-    else:
-        blendDeltaBytes, blendPerLodList, blendNames = None, None, None
+    # Returns (None, None, None) while EXPORT_WILDS_BLEND_SHAPES is off (the default).
+    blendDeltaBytes, blendPerLodList, blendNames = buildWildsBlendShapeExport(
+        parsedMesh, parsedSubMeshToSubMeshDataDict
+    )
     if blendNames is not None:
         for name in blendNames:
             reMesh.blendShapeNameRemapList.append(len(reMesh.rawNameList))
@@ -3000,6 +3042,9 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     faceBuffer.close()
     secondaryWeightBuffer.close()
 
+    if version == VERSION_MHWILDS:
+        _debugStreamingSplit(reMesh)
+
     return reMesh
 
 
@@ -3099,3 +3144,17 @@ def writeREMesh(reMeshFile, filepath):
     reMeshFile.meshVersion = meshVersion
     reMeshFile.write(file, version)
     file.close()
+
+    # MH Wilds: write the parallel streaming companion file when there is streamed data.
+    streamingBytes = getattr(reMeshFile, "streamingBytes", b"")
+    if streamingBytes:
+        paths = splitNativesPath(filepath)
+        if paths is not None:
+            streamingPath = os.path.join(paths[0], "streaming", paths[1])
+        else:
+            folder, name = os.path.split(filepath)
+            streamingPath = os.path.join(folder, "streaming", name)
+        os.makedirs(os.path.dirname(streamingPath), exist_ok=True)
+        with open(streamingPath, "wb") as streamFile:
+            streamFile.write(streamingBytes)
+        print(f"Wrote {len(streamingBytes)} bytes to streaming companion {streamingPath}")
