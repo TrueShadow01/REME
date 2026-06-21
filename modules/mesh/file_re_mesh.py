@@ -55,6 +55,11 @@ from .file_re_mesh_mply import REMeshMPLY
 
 IMPORT_BLEND_SHAPES = False  # Legacy (SF6 and earlier) blend shape import is still broken; keep disabled.
 
+# MH Wilds blend shape EXPORT. Off until the streaming-file write path is implemented: the engine
+# reads blend deltas from the streaming buffer, so a single-file export crashes (D3D E_INVALIDARG)
+# and corrupts the base file. With this off, shape-key meshes export as a clean base mesh.
+EXPORT_WILDS_BLEND_SHAPES = False
+
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
 # always imported regardless of IMPORT_BLEND_SHAPES. Other games stay gated by the flag above.
 WILDS_PACKED_BLEND_SHAPE_FILE_VERSIONS = frozenset(
@@ -2766,9 +2771,14 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     # MH Wilds blend shape (shape key) export: gather packed deltas and register morph names.
     # Blend shape names are appended after material/bone names; the remap maps each to its
     # rawNameList index (the import reads them back as the trailing name entries).
-    blendDeltaBytes, blendPerLodList, blendNames = buildWildsBlendShapeExport(
-        parsedMesh, parsedSubMeshToSubMeshDataDict
-    )
+    # Gated OFF: the single-file approach writes deltas the engine can't build (D3D crash) and
+    # corrupts the base file. Re-enabled once the proper streaming-file write path is implemented.
+    if EXPORT_WILDS_BLEND_SHAPES:
+        blendDeltaBytes, blendPerLodList, blendNames = buildWildsBlendShapeExport(
+            parsedMesh, parsedSubMeshToSubMeshDataDict
+        )
+    else:
+        blendDeltaBytes, blendPerLodList, blendNames = None, None, None
     if blendNames is not None:
         for name in blendNames:
             reMesh.blendShapeNameRemapList.append(len(reMesh.rawNameList))
