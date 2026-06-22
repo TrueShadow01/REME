@@ -557,9 +557,12 @@ def importMesh(
             sk.value = 0.0  # Default to the rest basis so the mesh isn't shown as a morph mix
             print(f"mesh vertices: {len(meshObj.data.vertices)}")
             print(f"delta vertices: {len(deltas)}")
-            if len(deltas) == len(meshObj.data.vertices):
-                for i in range(len(meshObj.data.vertices)):
-                    sk.data[i].co = meshObj.data.vertices[i].co + deltas[i]
+            # Wilds blend regions are partial: a shape's deltas cover only the morphable vertex span
+            # (submesh-relative, starting at vertex 0), not the whole submesh. Apply what we have and
+            # leave the rest at the basis, rather than discarding everything on a length mismatch.
+            n = min(len(deltas), len(meshObj.data.vertices))
+            for i in range(n):
+                sk.data[i].co = meshObj.data.vertices[i].co + deltas[i]
 
     return meshObj
 

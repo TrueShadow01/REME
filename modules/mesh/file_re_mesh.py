@@ -69,6 +69,28 @@ DEBUG_STREAMING_BUILD = True
 # (one target per blend submesh) is enabled by setting this False.
 EXPORT_WILDS_DEBUG_FIRST_TARGET_ONLY = False
 
+# Debug: when True, export blend shapes for only the LAST submesh that has them (drop the others).
+# Confirmed: the runtime's get_BlendShapeChannelNum reports joint-correction channels (defined
+# externally, by the skeleton/motion system), NOT the mesh's blend targets — so editing the mesh's
+# blend section never changes that count. The mesh's targets only supply deltas correctives look up
+# by name. Keep False so the body submesh's 12 corrective-named targets are all exported (the override
+# test below drives them via their existing pose-driven channels).
+EXPORT_WILDS_DEBUG_LAST_SUBMESH_ONLY = False
+
+# Debug piggyback test: rename the exported custom morph to exactly match an existing joint-correction
+# channel name. Empty string = no rename (keep the real shape-key names so the 12 body correctives stay
+# matched to their pose-driven channels for the override test below).
+EXPORT_WILDS_DEBUG_PIGGYBACK_NAME = ""
+
+# Debug delta-override test: replace every exported blend shape's deltas with a large uniform offset.
+# The 12 body-corrective channels are already pose-driven at runtime (several at weight ~0.9 at rest),
+# so if the engine reads its corrective deltas from the mesh, the body submesh will visibly lurch by
+# this offset. If the body looks normal, corrective deltas are external and the mesh blend section is
+# vestigial for armor. 0 = off; otherwise the per-axis offset in mesh units (meters).
+# Result (2026-06-22): body did NOT deform with a forced 0.3 offset on the 12 pose-driven correctives,
+# confirming the engine ignores mesh blend deltas for armor entirely. Kept off.
+EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET = 0
+
 # Stage A: write MH Wilds meshes as the real 2-file streamed layout (geometry moved into a streaming
 # companion). Required before blend shape export can work (the engine reads blend deltas from the
 # streaming buffer). Off = the normal single-file inline export. On for streaming development/testing.
@@ -2254,30 +2276,70 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
     blendNames = []
     anyBlend = False
     for lod in parsedMesh.mainMeshLODList:
-        targets = []
+        # Collect every submesh in this LOD that has shape keys.
+        blendSubs = []  # (startIdx, vertCount, shapes)
         for viscon in lod.visconGroupList:
             for sm in viscon.subMeshList:
                 shapes = getattr(sm, "blendShapeList", None)
                 if not shapes:
                     continue
                 anyBlend = True
-                blendShapeNum = len(shapes)
-                aabb = computeBlendShapeAABB([bs.deltas for bs in shapes])
                 subData = parsedSubMeshToSubMeshDataDict.get(sm)
                 startIdx = subData.vertexStartIndex if subData is not None else 0
+                blendSubs.append((startIdx, len(sm.vertexPosList), shapes))
+        if EXPORT_WILDS_DEBUG_LAST_SUBMESH_ONLY and len(blendSubs) > 1:
+            blendSubs = blendSubs[-1:]  # keep only the last blend submesh (the custom morph)
+        targets = []
+        if blendSubs:
+            # The engine allocates blend channels for ONE shared vertex region, so every target must
+            # cover the same merged region (one range per blend submesh, all starting from the region's
+            # base). Each shape's deltas span the whole region; the shape's real deltas land in its own
+            # submesh's portion and the rest are zero (which, with the symmetric AABB, means no movement).
+            # This matches how Capcom meshes lay out multi-target blends (face: 1 target; armor: 5 targets,
+            # all sharing the same subMeshEntries). Per-submesh disjoint targets are dropped by the engine.
+            mergedRegion = [(s, c) for (s, c, _sh) in blendSubs]
+            totalRegionVerts = sum(c for (_s, c, _sh) in blendSubs)
+            portionOffset = 0
+            for startIdx, vertCount, shapes in blendSubs:
+                if EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET:
+                    # AABB must cover the forced offset or the packer clamps it back to ~zero.
+                    aabb = computeBlendShapeAABB(
+                        [np.full((1, 3), EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET)]
+                    )
+                else:
+                    aabb = computeBlendShapeAABB([bs.deltas for bs in shapes])
                 ssIndex = len(blendNames)
                 for bs in shapes:
-                    blendNames.append(bs.blendShapeName)
-                packed = [packBlendShapeDeltas(bs.deltas, aabb) for bs in shapes]
-                deltaChunks.append(np.concatenate(packed).astype("<u4").tobytes())
+                    blendNames.append(
+                        EXPORT_WILDS_DEBUG_PIGGYBACK_NAME or bs.blendShapeName
+                    )
+                shapeArrays = []
+                for bs in shapes:
+                    full = np.zeros((totalRegionVerts, 3), dtype=np.float64)
+                    if EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET:
+                        # Force a large, obvious uniform delta on this submesh's portion.
+                        real = np.full((vertCount, 3), EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET)
+                    else:
+                        real = np.asarray(bs.deltas, dtype=np.float64).reshape(-1, 3)
+                    full[portionOffset : portionOffset + vertCount] = real
+                    shapeArrays.append(packBlendShapeDeltas(full, aabb))
+                chunk = np.concatenate(shapeArrays).astype("<u4").tobytes()
+                if DEBUG_STREAMING_BUILD:
+                    print(
+                        f"[BSEXP] target shapes={len(shapes)} regionVerts={totalRegionVerts} "
+                        f"portionOffset={portionOffset} portionVerts={vertCount} chunkBytes={len(chunk)} "
+                        f"names={[bs.blendShapeName for bs in shapes]}"
+                    )
+                deltaChunks.append(chunk)
                 targets.append(
                     {
-                        "blendShapeNum": blendShapeNum,
-                        "subEntries": [(startIdx, len(sm.vertexPosList))],
+                        "blendShapeNum": len(shapes),
+                        "subEntries": list(mergedRegion),
                         "aabb": aabb,
                         "blendSSIndex": ssIndex,
                     }
                 )
+                portionOffset += vertCount
         if EXPORT_WILDS_DEBUG_FIRST_TARGET_ONLY and len(targets) > 1:
             # Keep only the first target; trim its names and deltas from the shared lists too.
             dropped = targets[1:]
@@ -2345,8 +2407,12 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
         # size/index the block's blend shapes; writing 0 here is what crashed the GPU at load.
         totalShapes = sum(t["blendShapeNum"] for t in targets)
         firstSSIndex = targets[0]["blendSSIndex"] if targets else 0
+        # typing: the engine reads only the first target unless this signals multi-target. Originals:
+        # single-target face = 7, multi-target corrective armor (ch03_090_0012) = 3. With 7 on a
+        # multi-target block the runtime allocated channels for target[0] only (12 of 13). Use 3 when
+        # there's more than one target so every target's shapes get channels.
         struct.pack_into("<H", buf, d + 0, nTargets)  # targetCount
-        struct.pack_into("<H", buf, d + 2, 7)  # typing (Wilds packed)
+        struct.pack_into("<H", buf, d + 2, 3 if nTargets > 1 else 7)  # typing
         struct.pack_into("<I", buf, d + 4, (totalShapes << 16) | (firstSSIndex & 0xFFFF))  # unknFlag
         struct.pack_into("<I", buf, d + 8, 0)  # padding1
         struct.pack_into("<I", buf, d + 12, 0)  # padding2
@@ -2363,12 +2429,14 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
             struct.pack_into("<B", buf, tOff + 6, len(t["subEntries"]))  # subMeshEntryCount
             struct.pack_into("<B", buf, tOff + 7, 1)  # unkn2
             struct.pack_into("<Q", buf, tOff + 8, baseOffset + sOff)  # subMeshEntryOffset
+            cumOff = 0
             for j, (startIdx, vertCount) in enumerate(t["subEntries"]):
                 o = sOff + j * 16
                 struct.pack_into("<I", buf, o + 0, startIdx)  # subMeshVertexStartIndex
-                struct.pack_into("<I", buf, o + 4, 0)  # vertOffset
+                struct.pack_into("<I", buf, o + 4, cumOff)  # vertOffset (offset into the delta array)
                 struct.pack_into("<I", buf, o + 8, vertCount)
                 struct.pack_into("<I", buf, o + 12, 0)  # paramUnkn3
+                cumOff += vertCount
             aabb = t["aabb"]
             ao = lay["aabbOff"] + ti * 32
             struct.pack_into("<4f", buf, ao + 0, aabb.min.x, aabb.min.y, aabb.min.z, 0.0)
@@ -2498,6 +2566,12 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
                 sz += t["blendShapeNum"] * verts * 4
             perLodDeltas.append(blendDeltaBytes[cur : cur + sz])
             cur += sz
+            if DEBUG_STREAMING_BUILD:
+                print(
+                    f"[BSCONV] lod expectedDeltaBytes={sz} sliceBytes={len(perLodDeltas[-1])} "
+                    f"totalBlendDeltaBytes={len(blendDeltaBytes)} "
+                    f"targets={[(t['blendShapeNum'], sum(vc for (_s, vc) in t['subEntries'])) for t in lod['targets']]}"
+                )
 
     streamingBytes = bytearray()
     streamInfo = []  # (bufferStart, bufferLength)

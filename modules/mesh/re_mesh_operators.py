@@ -898,7 +898,7 @@ def dumpMeshStructure(filepath):
                 subs = []
                 for j in range(subCnt):
                     so = subOff + j * 16
-                    subs.append((u32(so), u32(so + 8)))  # startIndex, vertCount
+                    subs.append((u32(so), u32(so + 4), u32(so + 8)))  # startIndex, vertOffset, vertCount
                 a = aabbOff + ti * 32
                 aabbMax = (round(f32(a + 16), 5), round(f32(a + 20), 5), round(f32(a + 24), 5))
                 # Resolve each shape's name: blendShapeNameOffset is a u16 list (per shape occurrence,
@@ -955,6 +955,55 @@ def dumpMeshStructure(filepath):
             fStart = vStart + pad16(vc0 * 4)
             P(f"[DUMP]   face-data begins at companion offset {fStart - base0}; first entries (index,left,right):")
             P("[DUMP]     " + " ".join(str(nrEntry(fStart + k * 4)) for k in range(12)))
+
+    # Blend delta SAMPLE: decode the actual packed deltas of entry[0]'s first target, to check whether
+    # the original file's deltas are real or zero (and whether our 11/10/11 decode matches). deltaStart
+    # is streamingBufferHeader word9 (u32 at meshOffset+80+36); deltas live in the companion at it.
+    if bso and mo and entryCount and strmPath:
+        try:
+            cb = open(strmPath, "rb").read()
+        except Exception:
+            cb = None
+        if cb is not None:
+            block0 = u64(bso + 32)
+            tc0 = u16(block0)
+            dataOff0 = u64(block0 + 16)
+            aabbOff0 = u64(block0 + 24)
+            bsnoB = H["blendShapeNameOffset"]
+            nooB = H["nameOffsetsOffset"]
+            deltaStart = u32(eo + 36)  # entry[0] word9
+            dBase = streamInfo[0][0] + deltaStart
+            SENTINEL = 0x7FEFFBFF
+            P(f"[DUMP] BLEND DELTA SAMPLE (block0, deltaStart={deltaStart}): per-shape nonzero counts over a sample")
+            # Walk every target/shape. A shape's deltas start at deltaStart + (target's first-subEntry
+            # vertOffset + shapeIndex*regionVerts) packed u32; report how many sampled verts are real
+            # (not the 0x7FEFFBFF zero-sentinel) so we can see which shapes actually carry deformation.
+            for ti in range(tc0):
+                t = dataOff0 + ti * 16
+                ssIdx = u16(t)
+                bsNum = u16(t + 2)
+                subCnt = u8(t + 6)
+                subOff = u64(t + 8)
+                regionVerts = sum(u32(subOff + j * 16 + 8) for j in range(subCnt))
+                baseVertOff = u32(subOff + 4)  # first subEntry vertOffset = target's delta base
+                ax, ay, az = f32(aabbOff0 + ti * 32 + 16), f32(aabbOff0 + ti * 32 + 20), f32(aabbOff0 + ti * 32 + 24)
+                for s in range(bsNum):
+                    shapeOff = dBase + (baseVertOff + s * regionVerts) * 4
+                    sampleN = min(regionVerts, 4000)
+                    raws = [struct.unpack_from("<I", cb, shapeOff + k * 4)[0] for k in range(sampleN)]
+                    nonSentinel = sum(1 for v in raws if v != SENTINEL)
+                    maxMag = max(
+                        ax * abs(2 * (v & 0x7FF) / 2047 - 1)
+                        + ay * abs(2 * ((v >> 11) & 0x3FF) / 1023 - 1)
+                        + az * abs(2 * ((v >> 21) & 0x7FF) / 2047 - 1)
+                        for v in raws
+                    )
+                    nm = ""
+                    if bsnoB and nooB:
+                        nameIdx = u16(bsnoB + (ssIdx + s) * 2)
+                        so = u64(nooB + nameIdx * 8)
+                        nm = d[so : d.index(b"\x00", so)].decode("utf-8", "replace")
+                    P(f"[DUMP]   target{ti} shape{s} '{nm}': non-sentinel={nonSentinel}/{sampleN} maxAbsSum={round(maxMag, 5)}")
     P("=" * 70)
 
 

@@ -475,17 +475,34 @@ def _decodeWildsBlendShapes(reMesh):
         dz = aabb.min.z + nz * (aabb.max.z - aabb.min.z)
         deltas = np.stack([dx, dy, dz], axis=-1)  # (blendShapeNum, totalVerts, 3)
         ssBase = getattr(bt, "blendSSIndex", 0)
+        baseStart = getattr(subEntries[0], "subMeshVertexStartIndex", 0)
+        lastEnd = max(
+            getattr(sm, "subMeshVertexStartIndex", 0) + getattr(sm, "vertCount", 0)
+            for sm in subEntries
+        )
+        span = lastEnd - baseStart
         for s in range(blendShapeNum):
             name = shapeName(ssBase + s)
+            # Merge this shape's (possibly fragmented) subEntries into one dense delta array spanning
+            # the morphable region [baseStart, lastEnd); non-morphed gaps stay zero. Key it under the
+            # region's base vertex, which equals the owning submesh's vertexStartIndex, so the submesh
+            # picks it up and the applier places delta[i] on submesh-relative vertex i.
+            full = np.zeros((span, 3), dtype=np.float32)
             vOff = 0
             for sm in subEntries:
                 cnt = getattr(sm, "vertCount", 0)
                 startIdx = getattr(sm, "subMeshVertexStartIndex", 0)
-                entry = BlendShape()
-                entry.blendShapeName = name
-                entry.deltas = deltas[s, vOff : vOff + cnt]
+                full[startIdx - baseStart : startIdx - baseStart + cnt] = deltas[s, vOff : vOff + cnt]
                 vOff += cnt
-                lodDict.setdefault(startIdx, []).append(entry)
+            mags = np.abs(full).sum(axis=-1)
+            print(
+                f"[BSIMP] decode '{name}' baseStart={baseStart} span={span} "
+                f"nonzero={int((mags > 1e-5).sum())}/{span} maxAbsSum={float(mags.max()):.5f}"
+            )
+            entry = BlendShape()
+            entry.blendShapeName = name
+            entry.deltas = full
+            lodDict.setdefault(baseStart, []).append(entry)
         return deltaBytes
 
     def lodTotalDeltaBytes(bsData):
@@ -518,7 +535,19 @@ def _decodeWildsBlendShapes(reMesh):
             lastElem = se.vertexElementList[-1]
             endOfElements = lastElem.posStartOffset + meshVertCount * lastElem.stride
             tail = se.vertexBuffer[endOfElements:]
-            cur = ((len(tail) - lodTotalDeltaBytes(bsData)) // 16) * 16
+            # The blend deltas start at the entry's word9 (unkn9) offset, relative to the entry buffer
+            # (after the normal-recalc table). Earlier we 16-aligned (len(tail) - totalDeltaBytes), but
+            # that's wrong whenever endOfElements isn't 16-aligned (the geometry is padded to 16 before
+            # the tail). Read the authoritative offset; fall back to the old heuristic if it's absent.
+            if getattr(se, "unkn9", 0):
+                cur = se.unkn9 - endOfElements
+            else:
+                cur = ((len(tail) - lodTotalDeltaBytes(bsData)) // 16) * 16
+            print(
+                f"[BSIMP] LOD{lodIndex}: unkn9={getattr(se, 'unkn9', 0)} endOfElements={endOfElements} "
+                f"len(tail)={len(tail)} cur={cur} targets={len(bsData.blendTargetList)} "
+                f"totalDeltaBytes={lodTotalDeltaBytes(bsData)} vbufLen={len(se.vertexBuffer) if se.vertexBuffer else 0}"
+            )
             lodDict = {}
             for ti, bt in enumerate(bsData.blendTargetList):
                 cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict)
@@ -1088,8 +1117,11 @@ class ParsedREMesh:
             reMesh.meshVersion in PACKED_BLEND_SHAPE_MESH_VERSIONS
             and reMesh.blendShapeHeader is not None
             and len(reMesh.blendShapeHeader.blendShapeList) > 0
-            and reMesh.blendShapeHeader.blendShapeList[0].typing == 7
+            and reMesh.blendShapeHeader.blendShapeList[0].typing in (3, 7)
         ):
+            # typing 7 = single-target (face), typing 3 = multi-target joint-correction (armor/body).
+            # Both store the same 11/10/11 packed deltas; only the channel classification differs, so
+            # the same streamed decode applies. (Gating on ==7 was why armor morphs imported empty.)
             wildsBlendShapeDict = _decodeWildsBlendShapes(reMesh)
 
         # Parse Main Meshes
