@@ -817,6 +817,11 @@ def dumpMeshStructure(filepath):
         VEC = u16(mo + 34)
         streamingVEO = u64(mo + 64)
         P(f"[DUMP] MESH BUFFER HEADER: vertexBufferSize(base inline)={vertexBufferSize} totalBufferSize={totalBufferSize} mainVEC={mainVEC} VEC={VEC} streamingVertexElementOffset={streamingVEO}")
+        P(f"[DUMP]   meshBufferHeader rawHeader(u32x20)={[u32(mo + k * 4) for k in range(20)]}")
+        # Base vertex element declarations (at the header's vertexElementOffset = first u64).
+        baseVEO = u64(mo)
+        baseElems = [(u16(baseVEO + j * 8), u16(baseVEO + j * 8 + 2), u32(baseVEO + j * 8 + 4)) for j in range(mainVEC)]
+        P(f"[DUMP]   base vertexElements (typing,stride,offset)={baseElems}")
 
         # Streaming buffer header entries (at meshOffset + 80), 64 bytes each
         eo = mo + 80
@@ -840,6 +845,9 @@ def dumpMeshStructure(filepath):
                 endOfElements = last[2] + vertCount * last[1]
             blendTail = vbl - endOfElements
             P(f"[DUMP]   entry[{i}] totalBufferSize={tot} vertexBufferLength={vbl} unpaddedBufferSize={unpad} vertCount={vertCount} endOfElements={endOfElements} BLEND_TAIL={blendTail} faces={tot - vbl}")
+            raw = [u32(b + k * 4) for k in range(16)]
+            P(f"[DUMP]     rawHeader(u32x16)={raw}")
+            P(f"[DUMP]     vertexElements (typing,stride,offset)={elems}")
 
     # LOD / mesh-group structure: which submesh reads from which vertex buffer (vbi) and where.
     mgo = H["meshGroupOffset"]
@@ -873,13 +881,18 @@ def dumpMeshStructure(filepath):
         for li, off in enumerate(offs):
             targetCount = u16(off)
             typing = u16(off + 2)
+            unknFlag = u32(off + 4)
             dataOff = u64(off + 16)
             aabbOff = u64(off + 24)
-            P(f"[DUMP]   BlendShapeData[{li}] targetCount={targetCount} typing={typing}")
+            blendSOff = u64(off + 32)
+            blendSSOff = u64(off + 40)
+            P(f"[DUMP]   BlendShapeData[{li}] targetCount={targetCount} typing={typing} unknFlag={unknFlag} blendSOff={blendSOff} blendSSOff={blendSSOff}")
+            totalShapes = 0
             for ti in range(targetCount):
                 t = dataOff + ti * 16
                 ssIdx = u16(t)
                 bsNum = u16(t + 2)
+                totalShapes += bsNum
                 subCnt = u8(t + 6)
                 subOff = u64(t + 8)
                 subs = []
@@ -888,7 +901,60 @@ def dumpMeshStructure(filepath):
                     subs.append((u32(so), u32(so + 8)))  # startIndex, vertCount
                 a = aabbOff + ti * 32
                 aabbMax = (round(f32(a + 16), 5), round(f32(a + 20), 5), round(f32(a + 24), 5))
+                # Resolve each shape's name: blendShapeNameOffset is a u16 list (per shape occurrence,
+                # indexed by global blendSSIndex) into the name-offset table, which holds u64 string offsets.
+                names = []
+                bsno = H["blendShapeNameOffset"]
+                noo = H["nameOffsetsOffset"]
+                if bsno and noo:
+                    for k in range(bsNum):
+                        nameIdx = u16(bsno + (ssIdx + k) * 2)
+                        sOff = u64(noo + nameIdx * 8)
+                        end = d.index(b"\x00", sOff)
+                        names.append(d[sOff:end].decode("utf-8", "replace"))
                 P(f"[DUMP]     target[{ti}] blendSSIndex={ssIdx} blendShapeNum={bsNum} subMeshEntries={subs} aabbMax={aabbMax}")
+                P(f"[DUMP]       names={names}")
+            # blendS (3 ints) immediately followed by blendSSList (one int per shape across all targets).
+            if blendSOff:
+                blendS = [struct.unpack_from("<i", d, blendSOff + k * 4)[0] for k in range(3)]
+                P(f"[DUMP]     blendS={blendS}")
+            if blendSSOff:
+                ssList = [struct.unpack_from("<i", d, blendSSOff + k * 4)[0] for k in range(totalShapes)]
+                P(f"[DUMP]     blendSSList={ssList}")
+
+    # NormalRecalc header (base file) + sample of the per-vertex / per-face index data, which lives in
+    # the streaming tail of entry[0] (right after the declared geometry, before the blend deltas).
+    nro = H["normalRecalcOffset"]
+    if nro:
+        nrBlockCount = u32(nro)
+        nrDataOffset = u64(nro + 4)
+        nrNext = s16(nro + 12)
+        nrNull = s16(nro + 14)
+        nrVertexOffset = u32(nro + 16)
+        nrFaceOffset = u64(nro + 20)
+        P(f"[DUMP] NORMAL RECALC HEADER: blockCount={nrBlockCount} dataOffset={nrDataOffset} nextOffset={nrNext} null={nrNull} vertexOffset={nrVertexOffset} faceOffset={nrFaceOffset}")
+        try:
+            cbytes = open(strmPath, "rb").read() if strmPath else None
+        except Exception:
+            cbytes = None
+        if cbytes is not None and entryCount and mo:
+            # entry[0] geometry ends at endOfElements within the companion buffer (bufferStart=0).
+            b0 = eo  # streamingBufferHeaderList entry[0]
+            vbl0 = u32(b0 + 12)
+            veBase0 = streamingVEO
+            e0 = [(u16(veBase0 + j * 8), u16(veBase0 + j * 8 + 2), u32(veBase0 + j * 8 + 4)) for j in range(mainVEC)]
+            vc0 = (e0[1][2] - e0[0][2]) // e0[0][1] if e0[0][1] else 0
+            eoe0 = e0[-1][2] + vc0 * e0[-1][1]
+            base0 = streamInfo[0][0]  # bufferStart in companion
+            def nrEntry(o):
+                return (struct.unpack_from("<H", cbytes, o)[0], cbytes[o + 2], cbytes[o + 3])
+            vStart = base0 + eoe0
+            P(f"[DUMP]   entry[0] geom ends at companion offset {eoe0}; vertCount={vc0}; first vertex-data entries (index,left,right):")
+            P("[DUMP]     " + " ".join(str(nrEntry(vStart + k * 4)) for k in range(min(12, vc0))))
+            # Face data begins after vertexCount*4 (padded to 16).
+            fStart = vStart + pad16(vc0 * 4)
+            P(f"[DUMP]   face-data begins at companion offset {fStart - base0}; first entries (index,left,right):")
+            P("[DUMP]     " + " ".join(str(nrEntry(fStart + k * 4)) for k in range(12)))
     P("=" * 70)
 
 
