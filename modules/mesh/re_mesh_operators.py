@@ -1007,6 +1007,132 @@ def dumpMeshStructure(filepath):
     P("=" * 70)
 
 
+def patchStreamingBlendDeltas(obj, meshPath):
+    # Step 1 of the blend workflow: keep the original base file AND streaming file intact, and overwrite
+    # ONLY the LOD0 blend-delta slice in the streaming companion with the (edited) shape-key deltas,
+    # re-encoded in the original's exact target/subEntry layout + AABBs (captured at import as the
+    # object's re_wilds_blend_meta). This sidesteps regenerating the streamed structure entirely.
+    import json
+    import numpy as np
+
+    metaRaw = obj.get("re_wilds_blend_meta")
+    if not metaRaw:
+        return False, "Active object has no captured Wilds blend metadata (re-import the original first)."
+    meta = json.loads(metaRaw)
+    sk = obj.data.shape_keys
+    if sk is None or len(sk.key_blocks) < 2:
+        return False, "Active object has no shape keys."
+
+    d = open(meshPath, "rb").read()
+    if len(d) < 16 or struct.unpack_from("<I", d, 0)[0] != 1213416781:
+        return False, "Selected file is not a .mesh."
+
+    def u32(o):
+        return struct.unpack_from("<I", d, o)[0]
+
+    def u64(o):
+        return struct.unpack_from("<Q", d, o)[0]
+
+    meshOffset = u64(40 + 6 * 8)
+    sio = u64(40 + 15 * 8)
+    if not meshOffset or not sio:
+        return False, "Selected mesh has no streaming info (not a streamed mesh)."
+    entryOff = u64(sio + 8)
+    bufferStart0 = u32(entryOff)
+    word9 = u32(meshOffset + 80 + 36)  # entry[0] blend delta start, relative to its buffer
+    deltaAbs = bufferStart0 + word9  # absolute offset of LOD0 deltas in the companion
+
+    strmPath = _findStreamingCompanion(meshPath)
+    if strmPath is None:
+        return False, "Streaming companion not found next to the .mesh (copy the original streaming file in)."
+    companion = bytearray(open(strmPath, "rb").read())
+
+    basis = sk.key_blocks[0]
+    nVerts = len(basis.data)
+    basisCo = np.empty(nVerts * 3, dtype=np.float32)
+    basis.data.foreach_get("co", basisCo)
+    basisCo = basisCo.reshape(-1, 3)
+    blendRot = np.array(obj.matrix_world.to_3x3(), dtype=np.float32)
+
+    chunks = []
+    missing = []
+    for t in meta["targets"]:
+        mn = np.array(t["aabbMin"], dtype=np.float64)
+        mx = np.array(t["aabbMax"], dtype=np.float64)
+        rng = mx - mn
+        rng[rng == 0] = 1.0
+        for name in t["names"]:
+            kb = sk.key_blocks.get(name)
+            if kb is None:
+                missing.append(name)
+                game = np.zeros((nVerts, 3))
+            else:
+                skCo = np.empty(nVerts * 3, dtype=np.float32)
+                kb.data.foreach_get("co", skCo)
+                game = (skCo.reshape(-1, 3) - basisCo) @ blendRot.T
+            gmag = np.abs(game).sum(axis=-1)
+            clampMax = max(abs(mx[0]), abs(mn[0]), abs(mx[1]), abs(mn[1]), abs(mx[2]), abs(mn[2]))
+            print(
+                f"[BSPATCH]   '{name}': affected={int((gmag > 1e-5).sum())} maxAbsSum={float(gmag.max()):.5f} "
+                f"aabbMax={[round(v,5) for v in mx]} (clamp~{round(clampMax,5)})"
+            )
+            for sStart, _sVOff, sCnt in t["subEntries"]:
+                seg = np.asarray(game[sStart : sStart + sCnt], dtype=np.float64)
+                if len(seg) < sCnt:
+                    seg = np.vstack([seg, np.zeros((sCnt - len(seg), 3))])
+                norm = (seg - mn) / rng
+                xi = np.clip(np.round(norm[:, 0] * 2047), 0, 2047).astype(np.uint32)
+                yi = np.clip(np.round(norm[:, 1] * 1023), 0, 1023).astype(np.uint32)
+                zi = np.clip(np.round(norm[:, 2] * 2047), 0, 2047).astype(np.uint32)
+                chunks.append((xi | (yi << 11) | (zi << 21)).astype("<u4"))
+
+    blendDeltaBytes = np.concatenate(chunks).astype("<u4").tobytes() if chunks else b""
+    if deltaAbs + len(blendDeltaBytes) > len(companion):
+        return False, (
+            f"Delta region overflows the companion ({deltaAbs}+{len(blendDeltaBytes)} > {len(companion)}); "
+            "geometry/shape mismatch with the original."
+        )
+    companion[deltaAbs : deltaAbs + len(blendDeltaBytes)] = blendDeltaBytes
+    open(strmPath, "wb").write(companion)
+    msg = (
+        f"Patched {len(blendDeltaBytes)} bytes of LOD0 blend deltas into {os.path.basename(strmPath)} "
+        f"at offset {deltaAbs}."
+    )
+    if missing:
+        msg += f" Missing shape keys (left as zero): {missing}"
+    print("[BSPATCH] " + msg)
+    return True, msg
+
+
+class WM_OT_PatchWildsBlendDeltas(Operator):
+    bl_label = "Patch Wilds Blend Deltas Into Streaming (Debug)"
+    bl_idname = "re_mesh_cm.patch_wilds_blend_deltas"
+    bl_description = (
+        "Overwrite only the LOD0 blend-delta slice in a streamed mesh's streaming companion with the "
+        "active object's (edited) shape-key deltas, keeping the base file and the rest of the streaming "
+        "file intact. Select the mod-folder .mesh whose adjacent streaming companion should be patched"
+    )
+
+    filepath: StringProperty(subtype="FILE_PATH")
+    filter_glob: StringProperty(default="*.mesh*", options={"HIDDEN"})
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or obj.type != "MESH":
+            self.report({"ERROR"}, "Make the imported mesh object (with shape keys) the active object first")
+            return {"CANCELLED"}
+        if not self.filepath or not os.path.isfile(self.filepath):
+            self.report({"ERROR"}, "No valid .mesh selected")
+            return {"CANCELLED"}
+        ok, msg = patchStreamingBlendDeltas(obj, self.filepath)
+        self.report({"INFO"} if ok else {"ERROR"}, msg)
+        return {"FINISHED"} if ok else {"CANCELLED"}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+
 class WM_OT_DumpMeshStructure(Operator):
     bl_label = "Dump RE Mesh Structure (Debug)"
     bl_idname = "re_mesh_cm.dump_mesh_structure"

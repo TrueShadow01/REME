@@ -392,6 +392,7 @@ class SubMesh:
         self.linkedSubMesh = None
         self.subMeshIndex = 0
         self.blendShapeList = []
+        self.wildsBlendMeta = None  # MH Wilds: original blend-block layout for faithful re-export
         # DD2 shape key weights
         self.secondaryWeightList = []
         self.secondaryWeightIndicesList = []
@@ -434,6 +435,10 @@ def _decodeWildsBlendShapes(reMesh):
     # [blendShapeNum x vertCount] block of 4-byte 11/10/11-packed values, dequantized via the
     # per-LOD AABB. Returns {lodIndex: {subMeshVertexStartIndex: [BlendShape, ...]}}.
     result = {}
+    # Per-LOD original blend-block layout, captured so the exporter can rebuild the exact structure
+    # the engine expects (target grouping, fragmented subEntries, typing, per-target AABB, blendS).
+    # Keyed {lodIndex: {regionBaseVertex: blockMeta}}; stored on the owning submesh object at import.
+    reMesh.wildsBlendMeta = {}
     bsh = reMesh.blendShapeHeader
     mbh = reMesh.meshBufferHeader
     if bsh is None or mbh is None:
@@ -517,6 +522,36 @@ def _decodeWildsBlendShapes(reMesh):
             return bsData.aabbList[ti]
         return bsData.aabbList[0] if bsData.aabbList else AABB()
 
+    def buildBlockMeta(bsData):
+        # Serializable snapshot of one BlendShapeData block, for faithful re-export.
+        targets = []
+        for ti, bt in enumerate(bsData.blendTargetList):
+            aabb = targetAABB(bsData, ti)
+            subs = bt.subMeshEntryList if bt.subMeshEntryList else [bt]
+            ssBase = getattr(bt, "blendSSIndex", 0)
+            targets.append(
+                {
+                    "blendShapeNum": bt.blendShapeNum,
+                    "blendSSIndex": ssBase,
+                    "names": [shapeName(ssBase + s) for s in range(bt.blendShapeNum)],
+                    "aabbMin": [aabb.min.x, aabb.min.y, aabb.min.z],
+                    "aabbMax": [aabb.max.x, aabb.max.y, aabb.max.z],
+                    "subEntries": [
+                        [
+                            getattr(sm, "subMeshVertexStartIndex", 0),
+                            getattr(sm, "vertOffset", 0),
+                            getattr(sm, "vertCount", 0),
+                        ]
+                        for sm in subs
+                    ],
+                }
+            )
+        return {
+            "typing": bsData.typing,
+            "blendS": list(getattr(bsData, "blendS", [0, 0, 0]))[:3],
+            "targets": targets,
+        }
+
     if streamEntries:
         # Original game meshes: each LOD's targets are packed after a leading index/meshlet table in
         # that LOD's streaming vertex-buffer tail; 16-align the start to skip it (and trailing pad).
@@ -553,6 +588,12 @@ def _decodeWildsBlendShapes(reMesh):
                 cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict)
             if lodDict:
                 result[lodIndex] = lodDict
+                # The region base = first target's first subEntry start (= the owning submesh's
+                # vertexStartIndex). Store the block layout under it for exact re-export.
+                bt0 = bsData.blendTargetList[0]
+                subs0 = bt0.subMeshEntryList if bt0.subMeshEntryList else [bt0]
+                baseStart = getattr(subs0[0], "subMeshVertexStartIndex", 0)
+                reMesh.wildsBlendMeta.setdefault(lodIndex, {})[baseStart] = buildBlockMeta(bsData)
     else:
         # Re-exported (non-streamed) meshes: targets are dense blocks in the main vertex-buffer tail,
         # one per (LOD, target) in order, contiguous. Read them back sequentially.
@@ -883,6 +924,10 @@ def parseLODStructure(
                     submesh.blendShapeList.extend(
                         blendShapeDict[meshInfo.vertexStartIndex]
                     )
+                    if wildsBlendShapeDict is not None:
+                        submesh.wildsBlendMeta = reMesh.wildsBlendMeta.get(
+                            lodIndex, {}
+                        ).get(meshInfo.vertexStartIndex)
                 group.subMeshList.append(submesh)
             lod.visconGroupList.append(group)
         lodList.append(lod)

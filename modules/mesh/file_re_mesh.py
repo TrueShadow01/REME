@@ -58,7 +58,24 @@ IMPORT_BLEND_SHAPES = False  # Legacy (SF6 and earlier) blend shape import is st
 # MH Wilds blend shape EXPORT. The engine reads blend deltas from the streaming buffer, so this only
 # works alongside EXPORT_WILDS_STREAMING: convertToStreamedWilds writes the deltas into each LOD's
 # streaming entry tail (after the declared geometry), keeping the base file clean. Stage B.
+# Isolation test confirmed: geometry-only (no blend) loads fine; the crash is the blend structure.
 EXPORT_WILDS_BLEND_SHAPES = True
+
+# Debug: force a specific BlendShapeData.typing value (0 = use captured/meta typing, then the
+# nTargets-based rule). The faithful-rebuild path now carries the original typing in its metadata,
+# so this is left 0; set non-zero only to experiment.
+EXPORT_WILDS_DEBUG_FORCE_TYPING = 0
+
+# Debug: when True, export blend shapes with NO normal-recalc section (normalRecalcOffset=0, no tail
+# table). Tests whether the engine simply skips the normal-recalc pass when absent — if blend loads
+# without it, custom geometry never needs the (unreversed) adjacency format generated.
+EXPORT_WILDS_DEBUG_NO_NORMALRECALC = True
+
+# Debug: when True, the resident base buffer is a small distinct stub (a handful of verts) instead of
+# a full copy of the streamed LOD0. The original keeps its lowest LOD (smaller than the blend region)
+# resident, so the blend loader targets the streamed entry, not the resident. A full LOD0 copy gets
+# pulled into the blend path and crashes. Geometry is rendered from the streamed entry (vbi>=1).
+EXPORT_WILDS_DEBUG_SMALL_BASE = True
 
 # Temporary: prints a preview of the per-LOD streaming split during export (no file changes) so the
 # split logic can be validated against the original via the Dump button before the write is wired.
@@ -92,9 +109,11 @@ EXPORT_WILDS_DEBUG_PIGGYBACK_NAME = ""
 EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET = 0
 
 # Stage A: write MH Wilds meshes as the real 2-file streamed layout (geometry moved into a streaming
-# companion). Required before blend shape export can work (the engine reads blend deltas from the
-# streaming buffer). Off = the normal single-file inline export. On for streaming development/testing.
-EXPORT_WILDS_STREAMING = True
+# companion). Off = the normal single-file INLINE export (all geometry + blend deltas in the base
+# file, vbi=0, no streaming companion). Working custom mods are inline single-file and pair with the
+# vanilla streaming file, so we go inline and put the blend block + deltas inline too — far simpler
+# than the resident-base/streaming apparatus, which is what was crashing.
+EXPORT_WILDS_STREAMING = False
 
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
 # always imported regardless of IMPORT_BLEND_SHAPES. Other games stay gated by the flag above.
@@ -2276,8 +2295,8 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
     blendNames = []
     anyBlend = False
     for lod in parsedMesh.mainMeshLODList:
-        # Collect every submesh in this LOD that has shape keys.
-        blendSubs = []  # (startIdx, vertCount, shapes)
+        # Collect every submesh in this LOD that has shape keys (keep the submesh for its blend meta).
+        blendSubs = []  # (startIdx, vertCount, shapes, sm)
         for viscon in lod.visconGroupList:
             for sm in viscon.subMeshList:
                 shapes = getattr(sm, "blendShapeList", None)
@@ -2286,10 +2305,54 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                 anyBlend = True
                 subData = parsedSubMeshToSubMeshDataDict.get(sm)
                 startIdx = subData.vertexStartIndex if subData is not None else 0
-                blendSubs.append((startIdx, len(sm.vertexPosList), shapes))
+                blendSubs.append((startIdx, len(sm.vertexPosList), shapes, sm))
         if EXPORT_WILDS_DEBUG_LAST_SUBMESH_ONLY and len(blendSubs) > 1:
             blendSubs = blendSubs[-1:]  # keep only the last blend submesh (the custom morph)
         targets = []
+        blockTyping = None
+        blockBlendS = None
+        metaSubs = [bs for bs in blendSubs if getattr(bs[3], "wildsBlendMeta", None)]
+        if metaSubs:
+            # FAITHFUL PATH: rebuild the original block layout exactly from the metadata captured at
+            # import (target grouping, fragmented subEntries with their cumulative vertOffsets, typing,
+            # per-target AABB, blendS). Each shape's deltas are pulled from its shape key by name and
+            # sliced into the recorded sub-ranges, so the delta buffer matches the original byte layout.
+            for startIdx, vertCount, shapes, sm in metaSubs:
+                meta = sm.wildsBlendMeta
+                blockTyping = meta.get("typing")
+                blockBlendS = meta.get("blendS")
+                shapeByName = {bs.blendShapeName: bs for bs in shapes}
+                for mt in meta["targets"]:
+                    aabb = AABB()
+                    aabb.min.x, aabb.min.y, aabb.min.z = mt["aabbMin"]
+                    aabb.max.x, aabb.max.y, aabb.max.z = mt["aabbMax"]
+                    subs3 = [tuple(se) for se in mt["subEntries"]]  # (startIdx, vertOffset, vertCount)
+                    ssIndex = len(blendNames)
+                    shapeArrays = []
+                    for nm in mt["names"]:
+                        blendNames.append(nm)
+                        bs = shapeByName.get(nm)
+                        deltas = (
+                            np.asarray(bs.deltas, dtype=np.float64).reshape(-1, 3)
+                            if bs is not None
+                            else np.zeros((vertCount, 3))
+                        )
+                        for sStart, _sVOff, sCnt in subs3:
+                            seg = deltas[sStart : sStart + sCnt]
+                            if len(seg) < sCnt:  # shape key shorter than the recorded range: zero-pad
+                                seg = np.vstack([seg, np.zeros((sCnt - len(seg), 3))])
+                            shapeArrays.append(packBlendShapeDeltas(seg, aabb))
+                    deltaChunks.append(np.concatenate(shapeArrays).astype("<u4").tobytes())
+                    targets.append(
+                        {
+                            "blendShapeNum": mt["blendShapeNum"],
+                            "subEntries3": subs3,
+                            "aabb": aabb,
+                            "blendSSIndex": ssIndex,
+                        }
+                    )
+            perLodList.append({"targets": targets, "typing": blockTyping, "blendS": blockBlendS})
+            continue
         if blendSubs:
             # The engine allocates blend channels for ONE shared vertex region, so every target must
             # cover the same merged region (one range per blend submesh, all starting from the region's
@@ -2297,10 +2360,10 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
             # submesh's portion and the rest are zero (which, with the symmetric AABB, means no movement).
             # This matches how Capcom meshes lay out multi-target blends (face: 1 target; armor: 5 targets,
             # all sharing the same subMeshEntries). Per-submesh disjoint targets are dropped by the engine.
-            mergedRegion = [(s, c) for (s, c, _sh) in blendSubs]
-            totalRegionVerts = sum(c for (_s, c, _sh) in blendSubs)
+            mergedRegion = [(s, c) for (s, c, _sh, _sm) in blendSubs]
+            totalRegionVerts = sum(c for (_s, c, _sh, _sm) in blendSubs)
             portionOffset = 0
-            for startIdx, vertCount, shapes in blendSubs:
+            for startIdx, vertCount, shapes, sm in blendSubs:
                 if EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET:
                     # AABB must cover the forced offset or the packer clamps it back to ~zero.
                     aabb = computeBlendShapeAABB(
@@ -2347,7 +2410,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
             droppedNames = sum(t["blendShapeNum"] for t in dropped)
             del blendNames[len(blendNames) - droppedNames :]
             del deltaChunks[len(deltaChunks) - len(dropped) :]
-        perLodList.append({"targets": targets})
+        perLodList.append({"targets": targets, "typing": blockTyping, "blendS": blockBlendS})
     if not anyBlend:
         return None, None, None
     return b"".join(deltaChunks), perLodList, blendNames
@@ -2359,6 +2422,13 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
     # computing every internal absolute offset. Mirrors the import struct layout, with one or more
     # blend targets per LOD. The importer reads blendS/blendSSList immediately after the AABB list,
     # so those must be contiguous with it.
+    def subsOf(t):
+        # Normalize to (startIdx, vertOffset|None, vertCount). subEntries3 carries the original's exact
+        # cumulative vertOffsets; plain subEntries (custom path) leaves vertOffset None to be computed.
+        if "subEntries3" in t:
+            return [tuple(se) for se in t["subEntries3"]]
+        return [(s, None, c) for (s, c) in t["subEntries"]]
+
     count = len(perLodList)
     headerSize = getPaddedPos(32 + count * 8, 16)
     layout = []
@@ -2373,7 +2443,7 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
         subOffsets = []
         for t in targets:
             subOffsets.append(cur)
-            cur += 16 * len(t["subEntries"])
+            cur += 16 * len(subsOf(t))
         aabbOff = cur
         cur += 32 * nTargets
         blendSOff = cur  # blendS + blendSSList must follow the AABB list (read sequentially)
@@ -2412,7 +2482,9 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
         # multi-target block the runtime allocated channels for target[0] only (12 of 13). Use 3 when
         # there's more than one target so every target's shapes get channels.
         struct.pack_into("<H", buf, d + 0, nTargets)  # targetCount
-        struct.pack_into("<H", buf, d + 2, 3 if nTargets > 1 else 7)  # typing
+        # Faithful typing from the captured block wins; else the debug force; else the nTargets rule.
+        typingVal = lod.get("typing") or EXPORT_WILDS_DEBUG_FORCE_TYPING or (3 if nTargets > 1 else 7)
+        struct.pack_into("<H", buf, d + 2, typingVal)  # typing
         struct.pack_into("<I", buf, d + 4, (totalShapes << 16) | (firstSSIndex & 0xFFFF))  # unknFlag
         struct.pack_into("<I", buf, d + 8, 0)  # padding1
         struct.pack_into("<I", buf, d + 12, 0)  # padding2
@@ -2426,14 +2498,17 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
             struct.pack_into("<H", buf, tOff + 0, t["blendSSIndex"])
             struct.pack_into("<H", buf, tOff + 2, t["blendShapeNum"])
             struct.pack_into("<H", buf, tOff + 4, 0)  # unkn0
-            struct.pack_into("<B", buf, tOff + 6, len(t["subEntries"]))  # subMeshEntryCount
+            subs = subsOf(t)
+            struct.pack_into("<B", buf, tOff + 6, len(subs))  # subMeshEntryCount
             struct.pack_into("<B", buf, tOff + 7, 1)  # unkn2
             struct.pack_into("<Q", buf, tOff + 8, baseOffset + sOff)  # subMeshEntryOffset
             cumOff = 0
-            for j, (startIdx, vertCount) in enumerate(t["subEntries"]):
+            for j, (startIdx, vertOffset, vertCount) in enumerate(subs):
                 o = sOff + j * 16
                 struct.pack_into("<I", buf, o + 0, startIdx)  # subMeshVertexStartIndex
-                struct.pack_into("<I", buf, o + 4, cumOff)  # vertOffset (offset into the delta array)
+                # Use the recorded vertOffset (cumulative across the block in the original) when present;
+                # otherwise compute it per-target for the simplified/custom path.
+                struct.pack_into("<I", buf, o + 4, cumOff if vertOffset is None else vertOffset)
                 struct.pack_into("<I", buf, o + 8, vertCount)
                 struct.pack_into("<I", buf, o + 12, 0)  # paramUnkn3
                 cumOff += vertCount
@@ -2445,6 +2520,9 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
         # targets in the block (verified against the original ch03_090_0012: 5 targets of 1,1,1,1,8
         # shapes give [0..11], not a per-target restart). The face's single target made both readings
         # identical; the multi-target armor disambiguates. blendS (3 ints) stays zero (face uses that).
+        blendSVals = (lod.get("blendS") or [0, 0, 0])[:3]
+        for k, v in enumerate(blendSVals):
+            struct.pack_into("<i", buf, lay["blendSOff"] + k * 4, int(v))
         ssCursor = lay["blendSSOff"]
         ssVal = 0
         for t in targets:
@@ -2562,15 +2640,22 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
         for lod in blendPerLodList:
             sz = 0
             for t in lod["targets"]:
-                verts = sum(vc for (_si, vc) in t["subEntries"])
+                if "subEntries3" in t:
+                    verts = sum(vc for (_si, _vo, vc) in t["subEntries3"])
+                else:
+                    verts = sum(vc for (_si, vc) in t["subEntries"])
                 sz += t["blendShapeNum"] * verts * 4
             perLodDeltas.append(blendDeltaBytes[cur : cur + sz])
             cur += sz
             if DEBUG_STREAMING_BUILD:
+                def _tgtVerts(t):
+                    if "subEntries3" in t:
+                        return sum(vc for (_s, _vo, vc) in t["subEntries3"])
+                    return sum(vc for (_s, vc) in t["subEntries"])
                 print(
                     f"[BSCONV] lod expectedDeltaBytes={sz} sliceBytes={len(perLodDeltas[-1])} "
                     f"totalBlendDeltaBytes={len(blendDeltaBytes)} "
-                    f"targets={[(t['blendShapeNum'], sum(vc for (_s, vc) in t['subEntries'])) for t in lod['targets']]}"
+                    f"targets={[(t['blendShapeNum'], _tgtVerts(t)) for t in lod['targets']]}"
                 )
 
     streamingBytes = bytearray()
@@ -2601,9 +2686,10 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
         # arrays, deltas) starts 16-aligned — required or the GPU buffer view fails with E_INVALIDARG.
         geomEnd = getPaddedPos(len(geom), 16)
         geomPad = geomEnd - len(geom)
-        nrFace, nrVert = (
-            buildWildsNormalRecalcTail(vCount, faces, indexSize) if blendTail else (b"", b"")
-        )
+        if blendTail and not EXPORT_WILDS_DEBUG_NO_NORMALRECALC:
+            nrFace, nrVert = buildWildsNormalRecalcTail(vCount, faces, indexSize)
+        else:
+            nrFace, nrVert = (b"", b"")
         deltaStart = geomEnd + len(nrFace) + len(nrVert)
         vbl = deltaStart + len(blendTail)
         unpadded = vbl + len(faces)
@@ -2646,11 +2732,37 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
     baseElemOff = siStructOff + 16
     streamVEOff = getPaddedPos(baseElemOff + mainVEC * 8, 16)
     baseVtxOff = getPaddedPos(streamVEOff + entryCount * elemBlock, 16)
-    # The base buffer must be non-empty (a zero-size GPU buffer crashes the engine with E_INVALIDARG).
-    # Use the inline geometry as the resident base; the streamed entry is what's rendered (vbi=1).
-    baseVtxSize = getPaddedPos(len(inlineVtx), 16)
+    # The base buffer must be non-empty (a zero-size GPU buffer crashes the engine with E_INVALIDARG),
+    # but it must NOT be a full copy of the streamed blend-target LOD or the blend loader treats the
+    # resident as a blend target and crashes. Emit a small distinct resident (first N verts re-laid-out)
+    # mirroring how the original keeps a tiny low LOD resident; everything is rendered from vbi>=1.
+    if EXPORT_WILDS_DEBUG_SMALL_BASE:
+        inlineVertTotal = (
+            (elements[1].posStartOffset - elements[0].posStartOffset) // elements[0].stride
+            if len(elements) >= 2 and elements[0].stride
+            else (len(inlineVtx) // elements[0].stride if elements[0].stride else 0)
+        )
+        baseN = max(3, min(128, inlineVertTotal))
+        baseElements = []  # (typing, stride, offset) into the small base buffer
+        baseVtxBuf = bytearray()
+        for ve in elements:
+            baseElements.append((ve.typing, ve.stride, len(baseVtxBuf)))
+            baseVtxBuf += inlineVtx[ve.posStartOffset : ve.posStartOffset + baseN * ve.stride]
+        nTris = max(1, min(8, baseN // 3))
+        idxList = []
+        for t in range(nTris):
+            a = (t * 3) % baseN
+            idxList += [a, (a + 1) % baseN, (a + 2) % baseN]
+        baseFaceBuf = struct.pack(
+            f"<{len(idxList)}{'I' if indexSize == 4 else 'H'}", *idxList
+        )
+    else:
+        baseElements = [(ve.typing, ve.stride, ve.posStartOffset) for ve in elements]
+        baseVtxBuf = bytearray(inlineVtx)
+        baseFaceBuf = inlineFace
+    baseVtxSize = getPaddedPos(len(baseVtxBuf), 16)
     baseFaceOff = baseVtxOff + baseVtxSize
-    baseFaceSize = len(inlineFace)
+    baseFaceSize = len(baseFaceBuf)
     block2 = baseVtxSize + baseFaceSize
     regionEnd = getPaddedPos(baseFaceOff + baseFaceSize, 16)
 
@@ -2703,12 +2815,12 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
     sp("<I", buf, siStructOff + 0, entryCount)
     sp("<I", buf, siStructOff + 4, 0)
     sp("<Q", buf, siStructOff + 8, M + siEntriesOff)
-    # base vertex elements (declarations for the resident base buffer = inline geometry)
-    for j, ve in enumerate(elements):
+    # base vertex elements (declarations for the resident base buffer)
+    for j, (typing, stride, off) in enumerate(baseElements):
         eo = baseElemOff + j * 8
-        sp("<H", buf, eo + 0, ve.typing)
-        sp("<H", buf, eo + 2, ve.stride)
-        sp("<I", buf, eo + 4, ve.posStartOffset)
+        sp("<H", buf, eo + 0, typing)
+        sp("<H", buf, eo + 2, stride)
+        sp("<I", buf, eo + 4, off)
     # per-entry vertex elements (offsets relative to each entry's geometry)
     for i, e in enumerate(streamEntries):
         base = streamVEOff + i * elemBlock
@@ -2717,9 +2829,9 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
             sp("<H", buf, eo + 0, ve.typing)
             sp("<H", buf, eo + 2, ve.stride)
             sp("<I", buf, eo + 4, e["elemOffsets"][j])
-    # base vertex buffer + face buffer (resident copy)
-    buf[baseVtxOff : baseVtxOff + len(inlineVtx)] = inlineVtx
-    buf[baseFaceOff : baseFaceOff + len(inlineFace)] = inlineFace
+    # base vertex buffer + face buffer (small resident stub or full copy, per the flag)
+    buf[baseVtxOff : baseVtxOff + len(baseVtxBuf)] = baseVtxBuf
+    buf[baseFaceOff : baseFaceOff + len(baseFaceBuf)] = baseFaceBuf
     reMesh.meshRegionBytes = bytes(buf)
     reMesh.isStreamed = True
     if DEBUG_STREAMING_BUILD:
@@ -3200,7 +3312,11 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     # MH Wilds normal-recalc header (16 bytes) — present whenever the streamed mesh has blend shapes.
     # The engine reads the per-vertex/per-face index arrays from the streaming entry tails (written in
     # convertToStreamedWilds); this base header just marks the section as present (normalRecalcOffset).
-    if blendPerLodList is not None and EXPORT_WILDS_STREAMING:
+    if (
+        blendPerLodList is not None
+        and EXPORT_WILDS_STREAMING
+        and not EXPORT_WILDS_DEBUG_NO_NORMALRECALC
+    ):
         reMesh.fileHeader.normalRecalcOffset = currentOffset
         reMesh.normalRecalcRegionBytes = struct.pack("<IQhh", 1, 0, 0, 0)  # blockCount=1, dataOffset=0
         currentOffset = getPaddedPos(
