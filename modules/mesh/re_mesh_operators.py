@@ -1023,7 +1023,7 @@ def patchStreamingBlendDeltas(obj, meshPath):
     if sk is None or len(sk.key_blocks) < 2:
         return False, "Active object has no shape keys."
 
-    d = open(meshPath, "rb").read()
+    d = bytearray(open(meshPath, "rb").read())  # mutable: we patch the per-target AABBs in place
     if len(d) < 16 or struct.unpack_from("<I", d, 0)[0] != 1213416781:
         return False, "Selected file is not a .mesh."
 
@@ -1035,12 +1035,15 @@ def patchStreamingBlendDeltas(obj, meshPath):
 
     meshOffset = u64(40 + 6 * 8)
     sio = u64(40 + 15 * 8)
-    if not meshOffset or not sio:
-        return False, "Selected mesh has no streaming info (not a streamed mesh)."
+    blendShapesOffset = u64(40 + 5 * 8)
+    if not meshOffset or not sio or not blendShapesOffset:
+        return False, "Selected mesh has no streaming info / blend block (not a streamed blend mesh)."
     entryOff = u64(sio + 8)
     bufferStart0 = u32(entryOff)
     word9 = u32(meshOffset + 80 + 36)  # entry[0] blend delta start, relative to its buffer
     deltaAbs = bufferStart0 + word9  # absolute offset of LOD0 deltas in the companion
+    block0 = u64(blendShapesOffset + 32)
+    aabbOffset = u64(block0 + 24)  # per-target AABB array in the base file's blend block
 
     strmPath = _findStreamingCompanion(meshPath)
     if strmPath is None:
@@ -1056,28 +1059,39 @@ def patchStreamingBlendDeltas(obj, meshPath):
 
     chunks = []
     missing = []
-    for t in meta["targets"]:
-        mn = np.array(t["aabbMin"], dtype=np.float64)
-        mx = np.array(t["aabbMax"], dtype=np.float64)
-        rng = mx - mn
-        rng[rng == 0] = 1.0
+    for ti, t in enumerate(meta["targets"]):
+        # Game-space deltas for every shape in this target.
+        shapeDeltas = []
         for name in t["names"]:
             kb = sk.key_blocks.get(name)
             if kb is None:
                 missing.append(name)
-                game = np.zeros((nVerts, 3))
+                shapeDeltas.append(np.zeros((nVerts, 3)))
             else:
                 skCo = np.empty(nVerts * 3, dtype=np.float32)
                 kb.data.foreach_get("co", skCo)
-                game = (skCo.reshape(-1, 3) - basisCo) @ blendRot.T
-            gmag = np.abs(game).sum(axis=-1)
-            clampMax = max(abs(mx[0]), abs(mn[0]), abs(mx[1]), abs(mn[1]), abs(mx[2]), abs(mn[2]))
-            print(
-                f"[BSPATCH]   '{name}': affected={int((gmag > 1e-5).sum())} maxAbsSum={float(gmag.max()):.5f} "
-                f"aabbMax={[round(v,5) for v in mx]} (clamp~{round(clampMax,5)})"
-            )
+                shapeDeltas.append((skCo.reshape(-1, 3) - basisCo) @ blendRot.T)
+        # Recompute a symmetric AABB that actually covers the (edited) deltas across this target's
+        # region, so large edits aren't clamped to the original range. Patch it into the base file.
+        maxAbs = np.full(3, 1e-6)
+        for gd in shapeDeltas:
             for sStart, _sVOff, sCnt in t["subEntries"]:
-                seg = np.asarray(game[sStart : sStart + sCnt], dtype=np.float64)
+                seg = gd[sStart : sStart + sCnt]
+                if len(seg):
+                    maxAbs = np.maximum(maxAbs, np.max(np.abs(seg), axis=0))
+        ao = aabbOffset + ti * 32
+        struct.pack_into("<4f", d, ao + 0, -maxAbs[0], -maxAbs[1], -maxAbs[2], 0.0)
+        struct.pack_into("<4f", d, ao + 16, maxAbs[0], maxAbs[1], maxAbs[2], 0.0)
+        mn = -maxAbs
+        rng = 2.0 * maxAbs
+        rng[rng == 0] = 1.0
+        print(
+            f"[BSPATCH]   target{ti} '{t['names'][0]}'{'…' if len(t['names'])>1 else ''}: "
+            f"newAABBmax={[round(float(v),5) for v in maxAbs]}"
+        )
+        for gd in shapeDeltas:
+            for sStart, _sVOff, sCnt in t["subEntries"]:
+                seg = np.asarray(gd[sStart : sStart + sCnt], dtype=np.float64)
                 if len(seg) < sCnt:
                     seg = np.vstack([seg, np.zeros((sCnt - len(seg), 3))])
                 norm = (seg - mn) / rng
@@ -1094,9 +1108,10 @@ def patchStreamingBlendDeltas(obj, meshPath):
         )
     companion[deltaAbs : deltaAbs + len(blendDeltaBytes)] = blendDeltaBytes
     open(strmPath, "wb").write(companion)
+    open(meshPath, "wb").write(d)  # base file: only the per-target AABB floats changed
     msg = (
-        f"Patched {len(blendDeltaBytes)} bytes of LOD0 blend deltas into {os.path.basename(strmPath)} "
-        f"at offset {deltaAbs}."
+        f"Patched {len(blendDeltaBytes)} bytes of LOD0 deltas into {os.path.basename(strmPath)} (offset "
+        f"{deltaAbs}) and recomputed {len(meta['targets'])} target AABBs in the base file."
     )
     if missing:
         msg += f" Missing shape keys (left as zero): {missing}"
