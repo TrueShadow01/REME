@@ -66,9 +66,9 @@ class ExporterNodePropertyGroup(bpy.types.PropertyGroup):
         default=True,
     )
     exportBlendShapes: BoolProperty(
-        name="Export Blend Shapes",
-        description="Exports blend shapes from mesh if present",
-        default=True,
+        name="Export Blend Shapes (MH Wilds, experimental)",
+        description="Exports shape keys as MH Wilds blend shapes if present. EXPERIMENTAL: the blend data must ship in a PAK (loose streaming files are ignored by the game) and may not deform / may crash in-game. Leave OFF for normal geometry-only exports — geometry export is unaffected by this option",
+        default=False,
     )
     rotate90: BoolProperty(
         name="Convert Z Up To Y Up",

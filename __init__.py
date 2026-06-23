@@ -687,9 +687,9 @@ class REMeshPreferences(AddonPreferences):
         default=True,
     )
     default_exportBlendShapes: BoolProperty(
-        name="Export Blend Shapes",
-        description="Exports blend shapes from mesh if present",
-        default=True,
+        name="Export Blend Shapes (MH Wilds, experimental)",
+        description="Default for the 'Export Blend Shapes' export option. EXPERIMENTAL: the blend data must ship in a PAK (loose streaming files are ignored by the game) and may not deform / may crash in-game. Leave OFF for normal geometry-only exports — geometry export is unaffected by this option",
+        default=False,
     )
     default_rotate90export: BoolProperty(
         name="Convert Z Up To Y Up",
@@ -797,6 +797,7 @@ class REMeshPreferences(AddonPreferences):
         if self.showExportOptions:
             column2.prop(self, "default_selectedOnly")
             column2.prop(self, "default_exportAllLODs")
+            column2.prop(self, "default_exportBlendShapes")
             column2.prop(self, "default_autoSolveRepeatedUVs")
             column2.prop(self, "default_preserveSharpEdges")
             column2.prop(self, "default_rotate90export")
@@ -1209,9 +1210,9 @@ class ExportREMesh(Operator, ExportHelper):
         default=True,
     )
     exportBlendShapes: BoolProperty(
-        name="Export Blend Shapes",
-        description="Exports blend shapes from mesh if present",
-        default=True,
+        name="Export Blend Shapes (MH Wilds, experimental)",
+        description="Exports shape keys as MH Wilds blend shapes if present. EXPERIMENTAL: the blend data must ship in a PAK (loose streaming files are ignored by the game) and may not deform / may crash in-game. Leave OFF for normal geometry-only exports — geometry export is unaffected by this option",
+        default=False,
     )
     rotate90: BoolProperty(
         name="Convert Z Up To Y Up",
@@ -1352,7 +1353,7 @@ class ExportREMesh(Operator, ExportHelper):
         layout.prop(self, "selectedOnly")
         layout.label(text="Advanced Options")
         layout.prop(self, "exportAllLODs")
-        # layout.prop(self, "exportBlendShapes")
+        layout.prop(self, "exportBlendShapes")
         # hasREToolbox = hasattr(bpy.types, "OBJECT_PT_re_tools_quick_export_panel")
         row = layout.row()
         # row.enabled = hasREToolbox

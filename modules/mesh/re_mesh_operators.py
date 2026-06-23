@@ -341,7 +341,10 @@ def populateCollectionList(itemList, collection, recursionLevel, parentName):
                         "BatchExport_preserveSharpEdges"
                     ]
                     item.rotate90 = collection["BatchExport_rotate90"]
-                    # item.exportBlendShapes = collection["BatchExport_exportBlendShapes"]
+                    if "BatchExport_exportBlendShapes" in collection:
+                        item.exportBlendShapes = collection[
+                            "BatchExport_exportBlendShapes"
+                        ]
                     item.useBlenderMaterialName = collection[
                         "BatchExport_useBlenderMaterialName"
                     ]
@@ -450,6 +453,7 @@ class WM_OT_REBatchExporter(Operator):
                         filepath=exportItem.path,
                         targetCollection=exportItem.name,
                         exportAllLODs=exportItem.exportAllLODs,
+                        exportBlendShapes=exportItem.exportBlendShapes,
                         autoSolveRepeatedUVs=exportItem.autoSolveRepeatedUVs,
                         preserveSharpEdges=exportItem.preserveSharpEdges,
                         rotate90=exportItem.rotate90,
@@ -674,7 +678,7 @@ class WM_OT_REBatchExporter(Operator):
                     )
                 if item.exportType == "MESH":
                     box.prop(item, "exportAllLODs")
-                    # box.prop(self, "exportBlendShapes")
+                    box.prop(item, "exportBlendShapes")
                     box.prop(item, "autoSolveRepeatedUVs")
                     box.prop(item, "preserveSharpEdges")
                     box.prop(item, "rotate90")
@@ -1007,6 +1011,13 @@ def dumpMeshStructure(filepath):
     P("=" * 70)
 
 
+# Debug: when nonzero, the patch also shifts every LOD0 vertex position in the streaming file up by
+# this many units (Y). A diagnostic to tell whether the game actually reads the MOD's streaming file:
+# if the armor visibly moves in-game, the streaming is being read (so a blend that doesn't show is a
+# cache/other issue); if it doesn't move, the game is ignoring the mod's streaming (packaging problem).
+_DEBUG_BOTCH_STREAM_GEOMETRY = 0.0
+
+
 def patchStreamingBlendDeltas(obj, meshPath):
     # Step 1 of the blend workflow: keep the original base file AND streaming file intact, and overwrite
     # ONLY the LOD0 blend-delta slice in the streaming companion with the (edited) shape-key deltas,
@@ -1086,7 +1097,7 @@ def patchStreamingBlendDeltas(obj, meshPath):
         rng = 2.0 * maxAbs
         rng[rng == 0] = 1.0
         print(
-            f"[BSPATCH]   target{ti} '{t['names'][0]}'{'…' if len(t['names'])>1 else ''}: "
+            f"[BSPATCH]   target{ti} ({len(t['names'])} shape(s): {t['names']}): "
             f"newAABBmax={[round(float(v),5) for v in maxAbs]}"
         )
         for gd in shapeDeltas:
@@ -1107,6 +1118,22 @@ def patchStreamingBlendDeltas(obj, meshPath):
             "geometry/shape mismatch with the original."
         )
     companion[deltaAbs : deltaAbs + len(blendDeltaBytes)] = blendDeltaBytes
+
+    if _DEBUG_BOTCH_STREAM_GEOMETRY:
+        # Diagnostic: shift every LOD0 vertex position (Y) in the streaming file. entry[0] vertex
+        # elements live at the base's streamingVertexElementOffset; positions are the first element.
+        sveo = u64(meshOffset + 64)
+        e0Stride = struct.unpack_from("<H", d, sveo + 2)[0]
+        e0Off = struct.unpack_from("<I", d, sveo + 4)[0]
+        e1Off = struct.unpack_from("<I", d, sveo + 8 + 4)[0]
+        vc0 = (e1Off - e0Off) // e0Stride if e0Stride else 0
+        posBase = bufferStart0 + e0Off
+        for vi in range(vc0):
+            po = posBase + vi * e0Stride
+            y = struct.unpack_from("<f", companion, po + 4)[0]
+            struct.pack_into("<f", companion, po + 4, y + _DEBUG_BOTCH_STREAM_GEOMETRY)
+        print(f"[BSPATCH]   DEBUG botched {vc0} LOD0 positions by +{_DEBUG_BOTCH_STREAM_GEOMETRY} in Y")
+
     open(strmPath, "wb").write(companion)
     open(meshPath, "wb").write(d)  # base file: only the per-target AABB floats changed
     msg = (
