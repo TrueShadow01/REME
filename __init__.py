@@ -85,6 +85,8 @@ from .modules.mesh.re_mesh_export_errors import (
     WM_OT_ShowREMeshErrorWindow,
 )
 from .modules.mesh.re_mesh_operators import (
+    WM_OT_BotchStreamingGeometry,
+    WM_OT_ScaleBlendShapeAABB,
     WM_OT_CreateMeshCollection,
     WM_OT_DeleteLoose,
     WM_OT_DumpMeshStructure,
@@ -1990,6 +1992,8 @@ classes = [
     WM_OT_CreateMeshCollection,
     WM_OT_DumpMeshStructure,
     WM_OT_PatchWildsBlendDeltas,
+    WM_OT_BotchStreamingGeometry,
+    WM_OT_ScaleBlendShapeAABB,
     WM_OT_OpenTextureCacheFolder,
     WM_OT_ClearTextureCacheFolder,
     WM_OT_CheckTextureCacheSize,

@@ -1146,6 +1146,119 @@ def patchStreamingBlendDeltas(obj, meshPath):
     return True, msg
 
 
+def botchStreamingGeometryOnly(meshPath, shiftY):
+    # Incremental streaming experiment (base file left COMPLETELY untouched). Reads the base only to
+    # locate the LOD0 streaming entry's vertex positions, then shifts every LOD0 vertex up by shiftY
+    # (meters) in the STREAMING COMPANION and rewrites ONLY that file. Pair with the VANILLA base (which
+    # genuinely references the streaming entries) and PAK both: if the armor visibly moves in-game, the
+    # engine IS reading the mod's streaming companion — the earlier "streaming never loads" result was
+    # confounded by shipping an inline re-export base (streamEntryCount=0) that never requested streaming.
+    d = open(meshPath, "rb").read()  # READ ONLY: the base file is never written back
+    if len(d) < 16 or struct.unpack_from("<I", d, 0)[0] != 1213416781:
+        return False, "Selected file is not a .mesh."
+
+    def u16(o):
+        return struct.unpack_from("<H", d, o)[0]
+
+    def u32(o):
+        return struct.unpack_from("<I", d, o)[0]
+
+    def u64(o):
+        return struct.unpack_from("<Q", d, o)[0]
+
+    meshOffset = u64(40 + 6 * 8)
+    sio = u64(40 + 15 * 8)
+    if not meshOffset or not sio:
+        return False, "Selected mesh has no streaming info (not a streamed mesh — nothing to botch)."
+    entryOff = u64(sio + 8)
+    bufferStart0 = u32(entryOff)
+
+    strmPath = _findStreamingCompanion(meshPath)
+    if strmPath is None:
+        return False, "Streaming companion not found next to the .mesh (copy the original streaming file in)."
+    companion = bytearray(open(strmPath, "rb").read())
+
+    # entry[0] vertex elements: stride + offset of the first (position) element vs. the second element.
+    sveo = u64(meshOffset + 64)
+    e0Stride = u16(sveo + 2)
+    e0Off = u32(sveo + 4)
+    e1Off = u32(sveo + 8 + 4)
+    vc0 = (e1Off - e0Off) // e0Stride if e0Stride else 0
+    if vc0 <= 0:
+        return False, f"Could not determine LOD0 vertex count (stride={e0Stride}, e0Off={e0Off}, e1Off={e1Off})."
+    posBase = bufferStart0 + e0Off
+    if posBase + (vc0 - 1) * e0Stride + 8 > len(companion):
+        return False, (
+            f"Position region overflows the companion (posBase={posBase}, vc0={vc0}, stride={e0Stride}, "
+            f"companion={len(companion)}); base/streaming mismatch."
+        )
+    for vi in range(vc0):
+        po = posBase + vi * e0Stride
+        y = struct.unpack_from("<f", companion, po + 4)[0]
+        struct.pack_into("<f", companion, po + 4, y + shiftY)
+
+    open(strmPath, "wb").write(companion)  # ONLY the streaming companion is written
+    msg = (
+        f"Shifted {vc0} LOD0 vertices by +{shiftY} in Y in {os.path.basename(strmPath)} "
+        f"(posBase={posBase}, stride={e0Stride}). Base file left untouched. PAK base + this streaming "
+        f"file and check in-game whether the armor moves."
+    )
+    print("[STRMBOTCH] " + msg)
+    return True, msg
+
+
+def scaleBlendShapeAABB(meshPath, scale):
+    # Base-only blend experiment (no streaming touched). The streamed deltas are normalized 0..1 values
+    # dequantized as delta = aabbMin + n*(aabbMax-aabbMin); with the symmetric AABB (min=-max) this is
+    # delta = aabbMax*(2n-1), i.e. the deformation magnitude is LINEAR in aabbMax — and aabbMax lives in
+    # the blend block of the BASE file, which mods fully override. So multiplying every target's AABB by
+    # `scale` rescales every shape key's in-game deformation, using the game's own vanilla delta values.
+    # scale=2 -> twice the bend; scale=0 -> shape key goes flat. Writes ONLY the base file.
+    d = bytearray(open(meshPath, "rb").read())
+    if len(d) < 16 or struct.unpack_from("<I", d, 0)[0] != 1213416781:
+        return False, "Selected file is not a .mesh."
+
+    def u16(o):
+        return struct.unpack_from("<H", d, o)[0]
+
+    def u64(o):
+        return struct.unpack_from("<Q", d, o)[0]
+
+    bso = u64(40 + 5 * 8)  # blendShapesOffset
+    if not bso:
+        return False, "Selected mesh has no blend block (nothing to scale)."
+    count = u64(bso)  # one BlendShapeData per blend-carrying LOD
+    listStart = bso + 32
+    aabbFloatOffs = (0, 4, 8, 16, 20, 24)  # min.xyz then max.xyz (skip the .w padding at 12 and 28)
+    nBlocks = 0
+    nTargets = 0
+    for li in range(count):
+        block = u64(listStart + li * 8)
+        if not block:
+            continue
+        tc = u16(block)
+        aabbOff = u64(block + 24)
+        if not aabbOff:
+            continue
+        nBlocks += 1
+        for ti in range(tc):
+            ao = aabbOff + ti * 32
+            for fo in aabbFloatOffs:
+                v = struct.unpack_from("<f", d, ao + fo)[0]
+                struct.pack_into("<f", d, ao + fo, v * scale)
+            nTargets += 1
+    if nTargets == 0:
+        return False, "Blend block present but no target AABBs found."
+    open(meshPath, "wb").write(d)
+    msg = (
+        f"Scaled {nTargets} target AABB(s) across {nBlocks} blend block(s) by x{scale} in "
+        f"{os.path.basename(meshPath)} (base file only; streaming untouched). Equip in-game and check "
+        f"whether the existing correctives deform more/less."
+    )
+    print("[AABBSCALE] " + msg)
+    return True, msg
+
+
 class WM_OT_PatchWildsBlendDeltas(Operator):
     bl_label = "Patch Wilds Blend Deltas Into Streaming (Debug)"
     bl_idname = "re_mesh_cm.patch_wilds_blend_deltas"
@@ -1167,6 +1280,70 @@ class WM_OT_PatchWildsBlendDeltas(Operator):
             self.report({"ERROR"}, "No valid .mesh selected")
             return {"CANCELLED"}
         ok, msg = patchStreamingBlendDeltas(obj, self.filepath)
+        self.report({"INFO"} if ok else {"ERROR"}, msg)
+        return {"FINISHED"} if ok else {"CANCELLED"}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+
+class WM_OT_BotchStreamingGeometry(Operator):
+    bl_label = "Botch Streaming Geometry (base untouched, Debug)"
+    bl_idname = "re_mesh_cm.botch_streaming_geometry"
+    bl_description = (
+        "Streaming-only test: shift every LOD0 vertex up by 'Shift Y' meters in the streaming companion "
+        "while leaving the base .mesh COMPLETELY untouched. Select the VANILLA base .mesh (with its "
+        "original streaming companion alongside), PAK both, and check in-game: if the armor moves, the "
+        "engine reads the mod's streaming file (blend-via-streaming is viable); if not, streamed data "
+        "truly can't be overridden by a mod"
+    )
+
+    filepath: StringProperty(subtype="FILE_PATH")
+    filter_glob: StringProperty(default="*.mesh*", options={"HIDDEN"})
+    shiftY: FloatProperty(
+        name="Shift Y",
+        description="How far (meters) to shift every LOD0 vertex upward in the streaming file",
+        default=0.5,
+    )
+
+    def execute(self, context):
+        if not self.filepath or not os.path.isfile(self.filepath):
+            self.report({"ERROR"}, "No valid .mesh selected")
+            return {"CANCELLED"}
+        ok, msg = botchStreamingGeometryOnly(self.filepath, self.shiftY)
+        self.report({"INFO"} if ok else {"ERROR"}, msg)
+        return {"FINISHED"} if ok else {"CANCELLED"}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+
+class WM_OT_ScaleBlendShapeAABB(Operator):
+    bl_label = "Scale Blend Shape AABB (base only, Debug)"
+    bl_idname = "re_mesh_cm.scale_blend_shape_aabb"
+    bl_description = (
+        "Base-only blend test: multiply every blend target's AABB by 'Scale' in the selected .mesh, "
+        "writing ONLY the base file (streaming untouched). Because the streamed deltas are dequantized "
+        "as delta = aabbMax*(2n-1), this linearly rescales every existing shape key's deformation using "
+        "the game's own delta values. Scale=2 doubles the bend, Scale=0 flattens it. Proves whether we "
+        "can change a shape key purely through the moddable base file"
+    )
+
+    filepath: StringProperty(subtype="FILE_PATH")
+    filter_glob: StringProperty(default="*.mesh*", options={"HIDDEN"})
+    scale: FloatProperty(
+        name="Scale",
+        description="Factor to multiply every blend target's AABB by (2 = double the deformation, 0 = flat)",
+        default=2.0,
+    )
+
+    def execute(self, context):
+        if not self.filepath or not os.path.isfile(self.filepath):
+            self.report({"ERROR"}, "No valid .mesh selected")
+            return {"CANCELLED"}
+        ok, msg = scaleBlendShapeAABB(self.filepath, self.scale)
         self.report({"INFO"} if ok else {"ERROR"}, msg)
         return {"FINISHED"} if ok else {"CANCELLED"}
 

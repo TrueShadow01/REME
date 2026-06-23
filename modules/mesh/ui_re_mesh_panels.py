@@ -43,6 +43,8 @@ class OBJECT_PT_MeshObjectModePanel(Panel):
         # layout.operator("re_mesh_cm.quick_batch_export",icon = "OUTLINER_OB_GROUP_INSTANCE")#TODO FIX
         layout.operator("re_mesh_cm.dump_mesh_structure", icon="CONSOLE")
         layout.operator("re_mesh_cm.patch_wilds_blend_deltas", icon="MOD_DATA_TRANSFER")
+        layout.operator("re_mesh_cm.botch_streaming_geometry", icon="MOD_WARP")
+        layout.operator("re_mesh_cm.scale_blend_shape_aabb", icon="FULLSCREEN_ENTER")
 
 
 class OBJECT_PT_MeshArmatureToolsPanel(Panel):
