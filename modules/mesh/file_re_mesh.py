@@ -69,7 +69,7 @@ EXPORT_WILDS_DEBUG_FORCE_TYPING = 0
 # Debug: when True, export blend shapes with NO normal-recalc section (normalRecalcOffset=0, no tail
 # table). Tests whether the engine simply skips the normal-recalc pass when absent — if blend loads
 # without it, custom geometry never needs the (unreversed) adjacency format generated.
-EXPORT_WILDS_DEBUG_NO_NORMALRECALC = True
+EXPORT_WILDS_DEBUG_NO_NORMALRECALC = False
 
 # Debug: when True, the resident base buffer is a small distinct stub (a handful of verts) instead of
 # a full copy of the streamed LOD0. The original keeps its lowest LOD (smaller than the blend region)
@@ -114,6 +114,29 @@ EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET = 0
 # vanilla streaming file, so we go inline and put the blend block + deltas inline too — far simpler
 # than the resident-base/streaming apparatus, which is what was crashing.
 EXPORT_WILDS_STREAMING = False
+
+# EXPERIMENT (2026-06-23): single-file resident blend. Appends the streamed buffer into the BASE file
+# and rebases streamingInfo.bufferStart to in-base offsets, keeping the blend submesh at vbi=N.
+# SUPERSEDED by the REFramework recon (2026-06-23): vbi=N is resolved via DirectStorage/pak by hash+offset
+# into the PACKAGE, never from the base file — so the engine ignores these in-base bytes (and a changed
+# base streaming layout can make the DStorage read grab mismatched package data → crash). The correct
+# single-file path is vbi=0 (resident -> in_memory_buffer_ptr -> base buffer); we already know vbi=0
+# GEOMETRY renders from the base. The open question is whether the morph delta-fetch accepts a vbi=0 buffer
+# and which offset field locates the deltas within it — pending the runtime hook before a correct vbi=0
+# build. Leaving this flag (default False) for reference; do NOT rely on it. See [[reme-blendshape-export-fields]].
+EXPORT_WILDS_RESIDENT_BLEND = False
+
+# EXPERIMENT Phase 2 (2026-06-23): fixed/resident blendshape buffer. Per the REFramework recon, MH Wilds
+# splits blend deltas into a streaming buffer (DStorage/pak, unmoddable) vs a FIXED buffer (resident,
+# in_memory_buffer_ptr, in the base file). No shipped mesh uses the fixed buffer, but the API is live
+# (get_BlendShapeFixBufferSize). This mode authors a single-LOD base where the blend submesh's geometry
+# AND delta tail live in the resident buffer (vbi=0, which the engine reads from the base — proven for
+# geometry), described by ONE streaming-buffer-header entry with word11(vbi)=0 and word9=deltaStart, and
+# streamingInfo.bufferStart pointing at that resident buffer inside the base. HYPOTHESIS: the engine's
+# blend-size pass counts a vbi=0 entry's (vbl-word9) as FIX and reads deltas from the base. Validate by
+# loading + reading get_BlendShapeFixBufferSize (should become >0) and force-driving a channel. Requires
+# single-LOD input (export with "Export All LODs" OFF). See [[reme-wilds-engine-load-paths]].
+EXPORT_WILDS_FIX_BUFFER = False
 
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
 # always imported regardless of IMPORT_BLEND_SHAPES. Other games stay gated by the flag above.
@@ -1722,6 +1745,7 @@ class REMesh:
         self.normalRecalcRegionBytes = b""  # MH Wilds: pre-serialized 16-byte normal-recalc header
         self.streamingBytes = b""  # MH Wilds: bytes for the parallel streaming companion file
         self.isStreamed = False  # MH Wilds: True when the mesh region is written as the streamed layout
+        self.streamInBase = False  # MH Wilds: True = append streamingBytes to the base file (single-file experiment)
         self.meshRegionBytes = b""  # MH Wilds: pre-serialized mesh region (streamed layout)
 
     def read(
@@ -1935,6 +1959,11 @@ class REMesh:
             if self.isStreamed and self.meshRegionBytes:
                 # MH Wilds streamed layout: the whole mesh region was pre-serialized.
                 file.write(self.meshRegionBytes)
+                if self.streamInBase and self.streamingBytes:
+                    # Single-file resident-blend experiment: the streamed buffer lives in the base, 16-aligned
+                    # right after the mesh region (matches baseStreamOffset / the rebased bufferStarts).
+                    file.write(b"\x00" * getPaddingAmount(file.tell(), 16))
+                    file.write(self.streamingBytes)
             else:
                 self.meshBufferHeader.write(file, version)
 
@@ -2464,7 +2493,14 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
     buf = bytearray(cur)
     struct.pack_into("<Q", buf, 0, count)
     struct.pack_into("<Q", buf, 8, 0)  # zero
-    struct.pack_into("<Q", buf, 16, baseOffset + headerSize)  # mainOffset (decode ignores)
+    # mainOffset: the engine's load-time relocation reads this field (blendShapes+0x10) and uses it as the
+    # pointer to the per-block offset array (blendShapeOffsetList), which sits right after the 32-byte
+    # header. It MUST point at baseOffset+0x20 (matches vanilla = baseOffset+32). Pointing it at
+    # baseOffset+headerSize (the first data block) makes the engine read the block's targetCount/typing
+    # bytes as block-offset pointers -> rebases garbage -> deref -> access violation on hover. The import
+    # decoder ignores this field (reads the list at +0x20 directly), which hid the bug. (Found via the
+    # MonsterHunterWilds.exe+0xA9A7BCC crash disasm: the mesh is a self-relocating blob, base+offset.)
+    struct.pack_into("<Q", buf, 16, baseOffset + 32)  # mainOffset -> blendShapeOffsetList
     struct.pack_into("<Q", buf, 24, 0)  # hash
     for i, lay in enumerate(layout):
         struct.pack_into("<Q", buf, 32 + i * 8, baseOffset + lay["dataStructOff"])
@@ -2768,7 +2804,15 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
 
     reMesh.fileHeader.streamingInfoOffset = M + siStructOff
     reMesh.fileHeader.verticesOffset = M + baseVtxOff
-    reMesh.fileHeader.fileSize = M + regionEnd
+    # Resident-blend (single-file) experiment: append the streamed buffer to the BASE file and make every
+    # streamingInfo.bufferStart an in-base absolute offset, so deltaAddr = bufferStart + word9 lands on the
+    # bytes we wrote. Otherwise the streamed buffer goes to a separate companion (bufferStart 0-based).
+    residentBlend = EXPORT_WILDS_RESIDENT_BLEND
+    baseStreamOffset = getPaddedPos(M + regionEnd, 16)
+    if residentBlend:
+        reMesh.fileHeader.fileSize = baseStreamOffset + len(streamingBytes)
+    else:
+        reMesh.fileHeader.fileSize = M + regionEnd
 
     buf = bytearray(regionEnd)
     sp = struct.pack_into
@@ -2805,11 +2849,11 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
         sp("<I", buf, b + 36, e["deltaStart"])  # word9: blend delta start
         sp("<I", buf, b + 44, e["vbi"])  # word11: vertexBufferIndex that reads this entry
         sp("<Q", buf, b + 48, M + streamVEOff + i * elemBlock)  # word12: this entry's vertex elements
-        sp("<I", buf, b + 56, streamInfo[i][0] + e["total"])  # nextBufferOffset
+        sp("<I", buf, b + 56, (baseStreamOffset if residentBlend else 0) + streamInfo[i][0] + e["total"])  # nextBufferOffset
     # streamingInfo entries
     for i, (bs, bl) in enumerate(streamInfo):
         o = siEntriesOff + i * 8
-        sp("<I", buf, o + 0, bs)
+        sp("<I", buf, o + 0, (baseStreamOffset + bs) if residentBlend else bs)
         sp("<I", buf, o + 4, bl)
     # streamingInfo struct
     sp("<I", buf, siStructOff + 0, entryCount)
@@ -2834,7 +2878,13 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
     buf[baseFaceOff : baseFaceOff + len(baseFaceBuf)] = baseFaceBuf
     reMesh.meshRegionBytes = bytes(buf)
     reMesh.isStreamed = True
+    reMesh.streamInBase = residentBlend
     if DEBUG_STREAMING_BUILD:
+        if residentBlend:
+            print(
+                f"[STRM] RESIDENT-BLEND single-file: streamingBytes={len(streamingBytes)} appended to base "
+                f"at offset {baseStreamOffset}; bufferStarts rebased; fileSize={reMesh.fileHeader.fileSize}"
+            )
         print(
             f"[STRM] BUILT streamed: entries={entryCount} streamingBytes={len(streamingBytes)} "
             f"regionSize={regionEnd} meshOffset={M} streamingInfoOffset={M + siStructOff} "
@@ -2845,6 +2895,152 @@ def convertToStreamedWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
                 f"[STRM]  entry[{i}] total={e['total']} vbl={e['vbl']} unpadded={e['unpadded']} "
                 f"vCount={e['vCount']} bufStart={streamInfo[i][0]}"
             )
+    return True
+
+
+def convertToFixedBlendWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
+    # Phase 2 fixed/resident blend experiment. Single LOD only (export with "Export All LODs" OFF). Lays
+    # the blend submesh's geometry + normal-recalc + deltas into the RESIDENT buffer (the 80-byte mesh
+    # header's buffer, read via vbi=0 from the base) and describes the delta tail with ONE streaming-
+    # buffer-header entry whose vbi(word11)=0 and word9=deltaStart, with streamingInfo.bufferStart pointing
+    # at that resident buffer in-base. Goal: make the engine compute get_BlendShapeFixBufferSize > 0.
+    mbh = reMesh.meshBufferHeader
+    if mbh is None or reMesh.lodHeader is None or not mbh.vertexElementList:
+        return False
+    elements = mbh.vertexElementList
+    inlineVtx = bytes(mbh.vertexBuffer)
+    inlineFace = bytes(mbh.faceBuffer)
+    indexSize = 4 if reMesh.lodHeader.has32BitIndexBuffer else 2
+    mainVEC = len(elements)
+    lodGroups = reMesh.lodHeader.lodGroupList
+    if not lodGroups:
+        return False
+    if len(lodGroups) > 1 and DEBUG_STREAMING_BUILD:
+        print(f"[FIXBLEND] WARNING: {len(lodGroups)} LODs present; fixed-buffer mode uses LOD0 only. Export with 'Export All LODs' OFF.")
+    lodGroup = lodGroups[0]
+    if not lodGroup.meshGroupList or not lodGroup.meshGroupList[0].vertexInfoList:
+        return False
+
+    firstSub = lodGroup.meshGroupList[0].vertexInfoList[0]
+    vStart = firstSub.vertexStartIndex
+    fStart = firstSub.faceStartIndex
+    vCount = sum(mg.vertexCount for mg in lodGroup.meshGroupList)
+    fCount = sum(mg.faceCount for mg in lodGroup.meshGroupList)
+
+    geom = bytearray()
+    elemOffsets = []
+    for ve in elements:
+        elemOffsets.append(len(geom))
+        s = ve.stride
+        geom += inlineVtx[ve.posStartOffset + vStart * s : ve.posStartOffset + (vStart + vCount) * s]
+    faces = inlineFace[fStart * indexSize : (fStart + fCount) * indexSize]
+    deltas = blendDeltaBytes or b""  # single LOD: all the delta bytes belong here
+
+    geomEnd = getPaddedPos(len(geom), 16)
+    geomPad = geomEnd - len(geom)
+    if deltas and not EXPORT_WILDS_DEBUG_NO_NORMALRECALC:
+        nrFace, nrVert = buildWildsNormalRecalcTail(vCount, faces, indexSize)
+    else:
+        nrFace, nrVert = (b"", b"")
+    nrVertStart = geomEnd + len(nrFace)
+    deltaStart = nrVertStart + len(nrVert)
+    residentBuf = bytearray(geom)
+    residentBuf += b"\x00" * geomPad
+    residentBuf += nrFace
+    residentBuf += nrVert
+    residentBuf += deltas
+    vbl = len(residentBuf)  # vertex buffer length = geometry + tail (== deltaStart + len(deltas))
+
+    M = reMesh.fileHeader.meshOffset
+    elemBlock = getPaddedPos(mainVEC * 8, 16)
+    sbhlOff = 80
+    entryCount = 1
+    siEntriesOff = sbhlOff + entryCount * 64
+    siStructOff = getPaddedPos(siEntriesOff + entryCount * 8, 16)
+    baseElemOff = siStructOff + 16
+    streamVEOff = getPaddedPos(baseElemOff + mainVEC * 8, 16)
+    baseVtxOff = getPaddedPos(streamVEOff + entryCount * elemBlock, 16)
+    baseVtxSize = getPaddedPos(vbl, 16)
+    baseFaceOff = baseVtxOff + baseVtxSize
+    baseFaceSize = len(faces)
+    block2 = baseVtxSize + baseFaceSize
+    total = getPaddedPos(block2, 16)
+    unpadded = vbl + baseFaceSize
+    regionEnd = getPaddedPos(baseFaceOff + baseFaceSize, 16)
+
+    reMesh.fileHeader.streamingInfoOffset = M + siStructOff
+    reMesh.fileHeader.verticesOffset = M + baseVtxOff
+    reMesh.fileHeader.fileSize = M + regionEnd
+
+    buf = bytearray(regionEnd)
+    sp = struct.pack_into
+    # 80-byte mesh buffer header (SF6+)
+    sp("<Q", buf, 0, M + baseElemOff)   # vertexElementOffset
+    sp("<Q", buf, 8, M + baseVtxOff)    # vertexBufferOffset
+    sp("<Q", buf, 16, 0)               # sunbreakOffset
+    sp("<I", buf, 24, total)           # totalBufferSize
+    sp("<I", buf, 28, baseVtxSize)     # vertexBufferSize
+    sp("<H", buf, 32, mainVEC)
+    sp("<H", buf, 34, mainVEC)
+    sp("<I", buf, 36, block2)          # block2FaceBufferOffset
+    sp("<I", buf, 40, block2)          # NULL
+    sp("<h", buf, 44, 27104)           # vertexElementSize
+    sp("<h", buf, 46, -1)
+    sp("<Q", buf, 48, 0)
+    sp("<Q", buf, 56, 0)
+    sp("<Q", buf, 64, M + streamVEOff)  # streamingVertexElementOffset
+    sp("<Q", buf, 72, 0)
+    # ONE streaming buffer header entry describing the resident blend tail, vbi=0 (fixed/resident)
+    b = sbhlOff
+    sp("<I", buf, b + 8, total)
+    sp("<I", buf, b + 12, vbl)
+    sp("<H", buf, b + 16, mainVEC)
+    sp("<H", buf, b + 18, mainVEC)
+    sp("<I", buf, b + 20, unpadded)
+    sp("<I", buf, b + 24, unpadded)
+    sp("<I", buf, b + 28, geomEnd)      # word7: end of declared geometry
+    sp("<I", buf, b + 32, nrVertStart)  # word8: normal-recalc vertex array start
+    sp("<I", buf, b + 36, deltaStart)   # word9: blend delta start
+    sp("<I", buf, b + 44, 0)            # word11: vbi = 0 (resident -> fixed buffer)
+    sp("<Q", buf, b + 48, M + streamVEOff)        # word12: this entry's vertex elements
+    sp("<I", buf, b + 56, (M + baseVtxOff) + total)  # nextBufferOffset
+    # streamingInfo entry: buffer is the resident buffer, in the base
+    sp("<I", buf, siEntriesOff + 0, M + baseVtxOff)
+    sp("<I", buf, siEntriesOff + 4, total)
+    # streamingInfo struct
+    sp("<I", buf, siStructOff + 0, entryCount)
+    sp("<I", buf, siStructOff + 4, 0)
+    sp("<Q", buf, siStructOff + 8, M + siEntriesOff)
+    # base + per-entry vertex element declarations (geometry offsets within the resident buffer)
+    for tableOff in (baseElemOff, streamVEOff):
+        for j, ve in enumerate(elements):
+            eo = tableOff + j * 8
+            sp("<H", buf, eo + 0, ve.typing)
+            sp("<H", buf, eo + 2, ve.stride)
+            sp("<I", buf, eo + 4, elemOffsets[j])
+    # resident vertex buffer (geometry + tail) + face buffer
+    buf[baseVtxOff : baseVtxOff + len(residentBuf)] = residentBuf
+    buf[baseFaceOff : baseFaceOff + len(faces)] = faces
+
+    reMesh.meshRegionBytes = bytes(buf)
+    reMesh.isStreamed = True
+    reMesh.streamInBase = False  # all data is inside the mesh region; no separate companion append
+    reMesh.streamingBytes = b""
+    # submeshes read from the resident buffer (vbi=0), with LOD-relative indices
+    for mg in lodGroup.meshGroupList:
+        for sub in mg.vertexInfoList:
+            sub.vertexBufferIndex = 0
+            sub.vertexStartIndex -= vStart
+            sub.faceStartIndex -= fStart
+    if DEBUG_STREAMING_BUILD:
+        print(
+            f"[FIXBLEND] resident vbi=0 buffer: geom={len(geom)} nrFace={len(nrFace)} nrVert={len(nrVert)} "
+            f"deltas={len(deltas)} vbl={vbl} faces={baseFaceSize}"
+        )
+        print(
+            f"[FIXBLEND] authored FIX delta size (vbl-deltaStart)={vbl - deltaStart}  bufferStart(in-base)="
+            f"{M + baseVtxOff}  word9(deltaStart)={deltaStart}  fileSize={reMesh.fileHeader.fileSize}"
+        )
     return True
 
 
@@ -3314,7 +3510,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     # convertToStreamedWilds); this base header just marks the section as present (normalRecalcOffset).
     if (
         blendPerLodList is not None
-        and EXPORT_WILDS_STREAMING
+        and (EXPORT_WILDS_STREAMING or EXPORT_WILDS_FIX_BUFFER)
         and not EXPORT_WILDS_DEBUG_NO_NORMALRECALC
     ):
         reMesh.fileHeader.normalRecalcOffset = currentOffset
@@ -3407,7 +3603,12 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     # after the last declared vertex element (no padding before, matching the import math).
     # When streaming, the deltas go into the streaming entry tails instead (convertToStreamedWilds),
     # so the base buffer stays clean.
-    if blendDeltaBytes and not EXPORT_WILDS_STREAMING:
+    if (
+        blendDeltaBytes
+        and not EXPORT_WILDS_STREAMING
+        and not EXPORT_WILDS_RESIDENT_BLEND
+        and not EXPORT_WILDS_FIX_BUFFER
+    ):
         reMesh.meshBufferHeader.vertexBuffer.extend(blendDeltaBytes)
         currentBufferOffset += len(blendDeltaBytes)
 
@@ -3509,7 +3710,11 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     secondaryWeightBuffer.close()
 
     if version == VERSION_MHWILDS:
-        if EXPORT_WILDS_STREAMING:
+        if EXPORT_WILDS_FIX_BUFFER and blendPerLodList is not None:
+            convertToFixedBlendWilds(reMesh, blendDeltaBytes, blendPerLodList)
+        elif EXPORT_WILDS_STREAMING or (
+            EXPORT_WILDS_RESIDENT_BLEND and blendPerLodList is not None
+        ):
             convertToStreamedWilds(reMesh, blendDeltaBytes, blendPerLodList)
         else:
             _debugStreamingSplit(reMesh)
@@ -3614,9 +3819,10 @@ def writeREMesh(reMeshFile, filepath):
     reMeshFile.write(file, version)
     file.close()
 
-    # MH Wilds: write the parallel streaming companion file when there is streamed data.
+    # MH Wilds: write the parallel streaming companion file when there is streamed data — UNLESS the
+    # resident-blend single-file experiment embedded it in the base file already.
     streamingBytes = getattr(reMeshFile, "streamingBytes", b"")
-    if streamingBytes:
+    if streamingBytes and not getattr(reMeshFile, "streamInBase", False):
         paths = splitNativesPath(filepath)
         if paths is not None:
             streamingPath = os.path.join(paths[0], "streaming", paths[1])

@@ -1343,7 +1343,10 @@ class WM_OT_ScaleBlendShapeAABB(Operator):
         if not self.filepath or not os.path.isfile(self.filepath):
             self.report({"ERROR"}, "No valid .mesh selected")
             return {"CANCELLED"}
-        ok, msg = scaleBlendShapeAABB(self.filepath, self.scale)
+        # The panel field (Scene.re_mesh_aabb_scale) is the visible control; fall back to the operator
+        # property if the scene prop isn't present for some reason.
+        scale = getattr(context.scene, "re_mesh_aabb_scale", self.scale)
+        ok, msg = scaleBlendShapeAABB(self.filepath, scale)
         self.report({"INFO"} if ok else {"ERROR"}, msg)
         return {"FINISHED"} if ok else {"CANCELLED"}
 

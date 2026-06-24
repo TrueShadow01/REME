@@ -1398,6 +1398,16 @@ class ExportREMesh(Operator, ExportHelper):
 
         bpy.context.scene["REMeshDefaultExportSettingsLoaded"] = 1
 
+        # EXPERIMENT toggle: single-file resident blend (streamed buffer embedded in the base file).
+        # Applied as the module flag so the deep export path picks it up without threading options through.
+        try:
+            from .modules.mesh import file_re_mesh as _frm
+            _frm.EXPORT_WILDS_FIX_BUFFER = bool(
+                getattr(context.scene, "re_mesh_resident_blend", False)
+            )
+        except Exception:
+            pass
+
         if bpy.context.preferences.addons[__name__].preferences.showConsole:
             try:
                 bpy.ops.wm.console_toggle()
@@ -2250,6 +2260,20 @@ def register():
     bpy.types.WindowManager.enableModFileTracking = bpy.props.BoolProperty(
         default=False
     )
+    bpy.types.Scene.re_mesh_aabb_scale = bpy.props.FloatProperty(
+        name="Blend AABB Scale",
+        description="Factor the 'Scale Blend Shape AABB' button multiplies every blend target's AABB by "
+        "(2 = double the deformation, 0 = flatten, negative = invert). Base file only",
+        default=2.0,
+    )
+    bpy.types.Scene.re_mesh_resident_blend = bpy.props.BoolProperty(
+        name="Fixed-Buffer Blend (vbi=0, Phase 2 test)",
+        description="EXPERIMENT: author shape keys into the FIXED/resident blend buffer (deltas in the base, "
+        "vbi=0), so a single base file can carry blend data the engine reads from in_memory_buffer_ptr. "
+        "Requires 'Export All LODs' OFF (single LOD). After export, load + read get_BlendShapeFixBufferSize "
+        "via the REFramework probe: >0 means the engine accepted resident blend. MH Wilds shape keys only",
+        default=False,
+    )
     bpy.types.Scene.re_mdf_toolpanel = PointerProperty(type=MDFToolPanelPropertyGroup)
     bpy.types.Scene.re_modworkspace_toolpanel = PointerProperty(
         type=ModWorkspaceToolPanelPropertyGroup_CM
@@ -2282,6 +2306,8 @@ def register():
 
 def unregister():
     del bpy.types.WindowManager.enableModFileTracking
+    del bpy.types.Scene.re_mesh_aabb_scale
+    del bpy.types.Scene.re_mesh_resident_blend
     for classEntry in classes:
         bpy.utils.unregister_class(classEntry)
 
