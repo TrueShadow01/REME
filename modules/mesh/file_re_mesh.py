@@ -108,6 +108,14 @@ EXPORT_WILDS_DEBUG_PIGGYBACK_NAME = ""
 # confirming the engine ignores mesh blend deltas for armor entirely. Kept off.
 EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET = 0
 
+# Debug delta-amplify (2026-06-25): multiply the STORED blend AABB by this factor while packing against
+# the tight AABB, so the in-game dequant (min + n*(max-min)) yields AMPLIFY x the real delta. Makes
+# subtle breathing/corrective shapes visibly distinguishable when driving channels one at a time -- the
+# tool for the faithful-vs-custom test: re-export an original multi-shape mesh single-file and check
+# whether each driven channel deforms DIFFERENTLY (works) or identically (aliases like our custom path).
+# Same math as the scaleBlendShapeAABB button, applied at export. 1.0 = no-op; set back to 1.0 after.
+EXPORT_WILDS_DEBUG_DELTA_AMPLIFY = 8.0
+
 # Stage A: write MH Wilds meshes as the real 2-file streamed layout (geometry moved into a streaming
 # companion). Off = the normal single-file INLINE export (all geometry + blend deltas in the base
 # file, vbi=0, no streaming companion). Working custom mods are inline single-file and pair with the
@@ -137,6 +145,23 @@ EXPORT_WILDS_RESIDENT_BLEND = False
 # loading + reading get_BlendShapeFixBufferSize (should become >0) and force-driving a channel. Requires
 # single-LOD input (export with "Export All LODs" OFF). See [[reme-wilds-engine-load-paths]].
 EXPORT_WILDS_FIX_BUFFER = False
+
+# EXPERIMENT Phase 3 (2026-06-25): PER-SHAPE resident delta buffers. RE of the producer
+# (FUN_14a998a80, called via FUN_1400ace90 -> FUN_14afa5420) confirmed blend deltas are bound like
+# vertex streams: the fd-category loop (count [meshResource+0x80]+0xfd) resolves N buffer RESOURCES
+# from meshComponent+0x120d0 by per-entry ids ([..+0xa0]) and writes them to template[0x176 + slot +
+# group*0x18]. With ONE resident buffer entry the loop runs once -> only template[0x176+slot0] gets a
+# real pointer, slots 1..N-1 keep the memcpy'd default -> "shape 0 ok, 1..N-1 identical" (the exact
+# symptom on a single-submesh / N-shape mesh). HYPOTHESIS (pending the meshComponent+0x120d0 builder):
+# the engine mints one fd resource per streaming-buffer-header entry, so emitting N entries (one per
+# shape), all vbi=0, all sharing the resident vertex buffer but each with word9 = deltaStart +
+# shape*perShapeBytes, will yield N distinct per-shape delta resources. Layered ON TOP of FIX_BUFFER
+# (needs it on). Default False -- this is a best-guess byte layout to validate, not confirmed. See
+# [[reme-blend-delta-readpath]].
+# RESULT (2026-06-25): N entries changed nothing in-game -> fd resource count is NOT driven by the
+# streaming-buffer-header entry count. Descriptor source is elsewhere (blend block / the
+# meshComponent+0x120d0 builder). Kept off pending that function. See [[reme-blend-delta-readpath]].
+EXPORT_WILDS_FIX_PERSHAPE = False
 
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
 # always imported regardless of IMPORT_BLEND_SHAPES. Other games stay gated by the flag above.
@@ -2309,6 +2334,19 @@ def packBlendShapeDeltas(deltaArray, aabb):
     return (xi | (yi << 11) | (zi << 21)).astype("<u4")
 
 
+def _amplifyBlendAABB(aabb):
+    # DEBUG visibility: pack stays against the tight AABB (correct normalized bytes); we only store a
+    # SCALED AABB so the in-game dequant yields AMPLIFY x the real delta. Returns a new AABB (leaves the
+    # one used for packing untouched). AMPLIFY == 1.0 is a no-op. See EXPORT_WILDS_DEBUG_DELTA_AMPLIFY.
+    k = EXPORT_WILDS_DEBUG_DELTA_AMPLIFY
+    if k == 1.0:
+        return aabb
+    out = AABB()
+    out.min.x, out.min.y, out.min.z = aabb.min.x * k, aabb.min.y * k, aabb.min.z * k
+    out.max.x, out.max.y, out.max.z = aabb.max.x * k, aabb.max.y * k, aabb.max.z * k
+    return out
+
+
 def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
     # Gather Blender-side blend shapes into per-LOD blend targets. Each submesh that has shape keys
     # becomes its own blend target (its own blendShapeNum / AABB / name range), so submeshes with
@@ -2376,7 +2414,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                         {
                             "blendShapeNum": mt["blendShapeNum"],
                             "subEntries3": subs3,
-                            "aabb": aabb,
+                            "aabb": _amplifyBlendAABB(aabb),
                             "blendSSIndex": ssIndex,
                         }
                     )
@@ -2427,7 +2465,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     {
                         "blendShapeNum": len(shapes),
                         "subEntries": list(mergedRegion),
-                        "aabb": aabb,
+                        "aabb": _amplifyBlendAABB(aabb),
                         "blendSSIndex": ssIndex,
                     }
                 )
@@ -2952,9 +2990,18 @@ def convertToFixedBlendWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
     vbl = len(residentBuf)  # vertex buffer length = geometry + tail (== deltaStart + len(deltas))
 
     M = reMesh.fileHeader.meshOffset
+    # PER-SHAPE experiment (best-guess, pending the meshComponent+0x120d0 builder): emit one streaming-
+    # buffer-header entry per shape so the fd loop (FUN_14a998a80) mints N distinct delta resources
+    # instead of one. Every entry is vbi=0 and shares the SAME resident vertex buffer, but entry i's
+    # word9 points at shape i's delta slice (deltaStart + i*perShapeBytes). Entry 0 also carries the
+    # geometry boundaries. Flag off -> original single entry (unchanged behaviour).
+    tgts = blendPerLodList[0].get("targets", []) if blendPerLodList else []
+    totalShapes = sum(t["blendShapeNum"] for t in tgts)
+    perShapeBytes = ((len(deltas) // 4) // totalShapes) * 4 if totalShapes else 0
+    perShape = EXPORT_WILDS_FIX_PERSHAPE and totalShapes > 1 and perShapeBytes > 0
+    entryCount = totalShapes if perShape else 1
     elemBlock = getPaddedPos(mainVEC * 8, 16)
     sbhlOff = 80
-    entryCount = 1
     siEntriesOff = sbhlOff + entryCount * 64
     siStructOff = getPaddedPos(siEntriesOff + entryCount * 8, 16)
     baseElemOff = siStructOff + 16
@@ -2990,29 +3037,33 @@ def convertToFixedBlendWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
     sp("<Q", buf, 56, 0)
     sp("<Q", buf, 64, M + streamVEOff)  # streamingVertexElementOffset
     sp("<Q", buf, 72, 0)
-    # ONE streaming buffer header entry describing the resident blend tail, vbi=0 (fixed/resident)
-    b = sbhlOff
-    sp("<I", buf, b + 8, total)
-    sp("<I", buf, b + 12, vbl)
-    sp("<H", buf, b + 16, mainVEC)
-    sp("<H", buf, b + 18, mainVEC)
-    sp("<I", buf, b + 20, unpadded)
-    sp("<I", buf, b + 24, unpadded)
-    sp("<I", buf, b + 28, geomEnd)      # word7: end of declared geometry
-    sp("<I", buf, b + 32, nrVertStart)  # word8: normal-recalc vertex array start
-    sp("<I", buf, b + 36, deltaStart)   # word9: blend delta start
-    sp("<I", buf, b + 44, 0)            # word11: vbi = 0 (resident -> fixed buffer)
-    sp("<Q", buf, b + 48, M + streamVEOff)        # word12: this entry's vertex elements
-    sp("<I", buf, b + 56, (M + baseVtxOff) + total)  # nextBufferOffset
-    # streamingInfo entry: buffer is the resident buffer, in the base
-    sp("<I", buf, siEntriesOff + 0, M + baseVtxOff)
-    sp("<I", buf, siEntriesOff + 4, total)
+    # streaming buffer header entries: entryCount of them, all vbi=0, all sharing the resident buffer.
+    # entry i's word9 = shape i's delta slice so each resolves to a distinct fd (delta) resource.
+    for i in range(entryCount):
+        b = sbhlOff + i * 64
+        veOff = streamVEOff + i * elemBlock
+        shapeDeltaStart = deltaStart + i * perShapeBytes if perShape else deltaStart
+        sp("<I", buf, b + 8, total)
+        sp("<I", buf, b + 12, vbl)
+        sp("<H", buf, b + 16, mainVEC)
+        sp("<H", buf, b + 18, mainVEC)
+        sp("<I", buf, b + 20, unpadded)
+        sp("<I", buf, b + 24, unpadded)
+        sp("<I", buf, b + 28, geomEnd)            # word7: end of declared geometry
+        sp("<I", buf, b + 32, nrVertStart)        # word8: normal-recalc vertex array start
+        sp("<I", buf, b + 36, shapeDeltaStart)    # word9: this shape's blend delta start
+        sp("<I", buf, b + 44, 0)                  # word11: vbi = 0 (resident -> fixed buffer)
+        sp("<Q", buf, b + 48, M + veOff)          # word12: this entry's vertex elements
+        sp("<I", buf, b + 56, (M + baseVtxOff) + total)  # nextBufferOffset
+        # streamingInfo entry: buffer is the resident buffer, in the base
+        sp("<I", buf, siEntriesOff + i * 8 + 0, M + baseVtxOff)
+        sp("<I", buf, siEntriesOff + i * 8 + 4, total)
     # streamingInfo struct
     sp("<I", buf, siStructOff + 0, entryCount)
     sp("<I", buf, siStructOff + 4, 0)
     sp("<Q", buf, siStructOff + 8, M + siEntriesOff)
-    # base + per-entry vertex element declarations (geometry offsets within the resident buffer)
-    for tableOff in (baseElemOff, streamVEOff):
+    # base vertex elements + one per-entry copy each (geometry offsets within the resident buffer)
+    for tableOff in [baseElemOff] + [streamVEOff + i * elemBlock for i in range(entryCount)]:
         for j, ve in enumerate(elements):
             eo = tableOff + j * 8
             sp("<H", buf, eo + 0, ve.typing)
@@ -3041,6 +3092,16 @@ def convertToFixedBlendWilds(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
             f"[FIXBLEND] authored FIX delta size (vbl-deltaStart)={vbl - deltaStart}  bufferStart(in-base)="
             f"{M + baseVtxOff}  word9(deltaStart)={deltaStart}  fileSize={reMesh.fileHeader.fileSize}"
         )
+        # The delta blob is shape-major (N x regionVerts x 4), byte-identical to a vanilla STREAMED
+        # block (confirmed vs the import decoder decodeTarget). "shape 0 ok, 1..N-1 aliased" is the
+        # resident producer minting only one per-shape delta resource. expectedDeltaOffsets = where
+        # each shape's deltas live; with perShape mode each gets its own streaming entry pointing there.
+        if totalShapes:
+            offs = [deltaStart + s * perShapeBytes for s in range(totalShapes)]
+            print(
+                f"[FIXBLEND] PER-SHAPE: mode={'N-entries' if perShape else 'single'} shapes={totalShapes} "
+                f"perShapeBytes={perShapeBytes} residentBufferEntries={entryCount} expectedDeltaOffsets={offs}"
+            )
     return True
 
 
