@@ -47,7 +47,6 @@ class OBJECT_PT_MeshObjectModePanel(Panel):
         row = layout.row(align=True)
         row.prop(scene, "re_mesh_aabb_scale")
         row.operator("re_mesh_cm.scale_blend_shape_aabb", text="", icon="FULLSCREEN_ENTER")
-        layout.prop(scene, "re_mesh_resident_blend")
 
 
 class OBJECT_PT_MeshArmatureToolsPanel(Panel):
