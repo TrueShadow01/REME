@@ -67,6 +67,14 @@ EXPORT_WILDS_BLEND_SHAPES = True
 # so this is left 0; set non-zero only to experiment.
 EXPORT_WILDS_DEBUG_FORCE_TYPING = 0
 
+# Blend layout selector. True = INLINE: append the deltas to the normal inline vertex buffer and keep the
+# working resident layout (standard SF6+ header, trivial streaming info) the normal export produces -- this
+# renders all geometry correctly (the custom streaming descriptor below explodes the body submesh). False =
+# STREAMING DESCRIPTOR: buildWildsSingleFileBlend rebuilds the region with an sbh entry + streamingInfo
+# (binds a delta resource so the shape drives, but mis-reads the resident geometry). Testing whether the
+# inline tail alone is enough for the engine to find/bind the deltas now that the target-list crash is fixed.
+EXPORT_WILDS_BLEND_INLINE = True
+
 # Debug: when True, the resident base buffer is a small distinct stub (a handful of verts) instead of
 # a full copy of the streamed LOD0. The original keeps its lowest LOD (smaller than the blend region)
 # resident, so the blend loader targets the streamed entry, not the resident. A full LOD0 copy gets
@@ -2292,15 +2300,17 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
     anyBlend = False
     for lod in parsedMesh.mainMeshLODList:
         # Collect every submesh in this LOD that has shape keys (keep the submesh for its blend meta).
-        blendSubs = []  # (startIdx, vertCount, shapes, sm)
+        blendSubs = []  # (startIdx, vertCount, shapes, sm) -- submeshes that carry shape keys
+        allSubs = []    # (startIdx, vertCount) -- EVERY submesh in the LOD, for the merged blend region
         for viscon in lod.visconGroupList:
             for sm in viscon.subMeshList:
+                subData = parsedSubMeshToSubMeshDataDict.get(sm)
+                startIdx = subData.vertexStartIndex if subData is not None else 0
+                allSubs.append((startIdx, len(sm.vertexPosList)))
                 shapes = getattr(sm, "blendShapeList", None)
                 if not shapes:
                     continue
                 anyBlend = True
-                subData = parsedSubMeshToSubMeshDataDict.get(sm)
-                startIdx = subData.vertexStartIndex if subData is not None else 0
                 blendSubs.append((startIdx, len(sm.vertexPosList), shapes, sm))
         if EXPORT_WILDS_DEBUG_LAST_SUBMESH_ONLY and len(blendSubs) > 1:
             blendSubs = blendSubs[-1:]  # keep only the last blend submesh (the custom morph)
@@ -2350,15 +2360,16 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
             perLodList.append({"targets": targets, "typing": blockTyping, "blendS": blockBlendS})
             continue
         if blendSubs:
-            # The engine allocates blend channels for ONE shared vertex region, so every target must
-            # cover the same merged region (one range per blend submesh, all starting from the region's
-            # base). Each shape's deltas span the whole region; the shape's real deltas land in its own
-            # submesh's portion and the rest are zero (which, with the symmetric AABB, means no movement).
-            # This matches how Capcom meshes lay out multi-target blends (face: 1 target; armor: 5 targets,
-            # all sharing the same subMeshEntries). Per-submesh disjoint targets are dropped by the engine.
-            mergedRegion = [(s, c) for (s, c, _sh, _sm) in blendSubs]
-            totalRegionVerts = sum(c for (_s, c, _sh, _sm) in blendSubs)
-            portionOffset = 0
+            # The engine processes EVERY submesh through the blend pipeline once the mesh has a blend
+            # block; a submesh left OUT of the target's subEntries gets no blend-group entry and renders
+            # as garbage (this is why the non-morph body submesh flew off into the sky). So the merged
+            # region spans ALL submeshes in vertex order, and non-morph submeshes contribute zero deltas
+            # (no movement, with the symmetric AABB). Each morph submesh becomes a target covering the
+            # whole region, its real deltas landing in its own portion (offset = its start - region base).
+            allSubs.sort(key=lambda sc: sc[0])
+            regionBase = allSubs[0][0]
+            mergedRegion = [(s, c) for (s, c) in allSubs]
+            totalRegionVerts = sum(c for (_s, c) in allSubs)
             for startIdx, vertCount, shapes, sm in blendSubs:
                 if EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET:
                     # AABB must cover the forced offset or the packer clamps it back to ~zero.
@@ -2372,6 +2383,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     blendNames.append(
                         EXPORT_WILDS_DEBUG_PIGGYBACK_NAME or bs.blendShapeName
                     )
+                portionOffset = startIdx - regionBase
                 shapeArrays = []
                 for bs in shapes:
                     full = np.zeros((totalRegionVerts, 3), dtype=np.float64)
@@ -2387,7 +2399,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     print(
                         f"[BSEXP] target shapes={len(shapes)} regionVerts={totalRegionVerts} "
                         f"portionOffset={portionOffset} portionVerts={vertCount} chunkBytes={len(chunk)} "
-                        f"names={[bs.blendShapeName for bs in shapes]}"
+                        f"subEntries={len(mergedRegion)} names={[bs.blendShapeName for bs in shapes]}"
                     )
                 deltaChunks.append(chunk)
                 targets.append(
@@ -2398,7 +2410,6 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                         "blendSSIndex": ssIndex,
                     }
                 )
-                portionOffset += vertCount
         if EXPORT_WILDS_DEBUG_FIRST_TARGET_ONLY and len(targets) > 1:
             # Keep only the first target; trim its names and deltas from the shared lists too.
             dropped = targets[1:]
@@ -2651,6 +2662,10 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
             for sub in mg.vertexInfoList:
                 print(f"[SFBLEND]   group{gi} sub vtxStart={sub.vertexStartIndex} "
                       f"faceStart={sub.faceStartIndex} vbi={sub.vertexBufferIndex}")
+        print(f"[SFBLEND] vertexBuffer={len(inlineVtx)} faceBuffer={len(inlineFace)} "
+              f"mainVEC={mainVEC} elements:")
+        for j, ve in enumerate(elements):
+            print(f"[SFBLEND]   elem{j} typing={ve.typing} stride={ve.stride} posStartOffset={ve.posStartOffset}")
 
     # Use the geometry buffer VERBATIM. It already renders correctly through the normal export path; the
     # previous element-by-element re-slice (which recomputed each element's offset) misplaced the Wilds
@@ -2674,7 +2689,10 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     residentBuf = bytearray(geom)
     residentBuf += b"\x00" * geomPad
     residentBuf += deltas
-    vbl = len(residentBuf)  # vertex buffer length = geometry + tail (== deltaStart + len(deltas))
+    # 16-align the whole vertex buffer so vertexBufferLength (sbh word at +12) equals the padded size and
+    # the face buffer that follows sits exactly at bufferStart+vertexBufferLength (no 4-byte skew).
+    residentBuf += b"\x00" * (-len(residentBuf) % 16)
+    vbl = len(residentBuf)  # vertex buffer length = geometry + tail (16-aligned; faces follow at vbl)
 
     M = reMesh.fileHeader.meshOffset
     entryCount = 1
@@ -3268,10 +3286,13 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
         reMesh.meshBufferHeader.vertexElementList.append(vertexElement)
         reMesh.meshBufferHeader.vertexBuffer.extend(extraWeightBuffer.getvalue())
 
-    # MH Wilds blend deltas are NOT appended into the inline tail here — buildWildsSingleFileBlend
-    # (called at the end) rebuilds the resident buffer with geometry + normal-recalc + deltas plus the
-    # in-base buffer descriptor the engine needs (a bare inline tail with no descriptor crashes on a
-    # from-scratch blend armor).
+    # MH Wilds INLINE blend: append the deltas to the inline vertex buffer right after the declared
+    # geometry, BEFORE the buffer-size fields are computed below, so they flow through the normal write
+    # path (which renders all geometry correctly). The deltas sit in the undeclared tail; the blend block
+    # describes the targets. No custom streaming descriptor (that path explodes the body submesh).
+    if EXPORT_WILDS_BLEND_INLINE and blendDeltaBytes:
+        reMesh.meshBufferHeader.vertexBuffer.extend(blendDeltaBytes)
+        currentBufferOffset += len(blendDeltaBytes)
 
     reMesh.meshBufferHeader.faceBuffer = faceBuffer.getvalue()
     # print(len(reMesh.meshBufferHeader.faceBuffer))
@@ -3370,11 +3391,15 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     faceBuffer.close()
     secondaryWeightBuffer.close()
 
-    # MH Wilds single-file blend: rebuild the mesh region as a RESIDENT (vbi=0) buffer carrying the
-    # geometry + normal-recalc + deltas, described by an in-base streaming-buffer-header entry +
-    # streamingInfo. This is mandatory for a self-sufficient base file — the blend block alone, with no
-    # in-base buffer descriptor and no vanilla streaming companion, crashes the engine's blend setup.
-    if version == VERSION_MHWILDS and blendPerLodList is not None:
+    # MH Wilds single-file blend. INLINE mode (default): deltas were already appended to the inline buffer
+    # above and the normal write path emits the working resident layout -- nothing to do here. STREAMING
+    # mode: rebuild the mesh region with an sbh entry + streamingInfo describing an in-base delta resource
+    # (binds the delta but mis-reads the body geometry). Toggle via EXPORT_WILDS_BLEND_INLINE.
+    if (
+        not EXPORT_WILDS_BLEND_INLINE
+        and version == VERSION_MHWILDS
+        and blendPerLodList is not None
+    ):
         buildWildsSingleFileBlend(reMesh, blendDeltaBytes, blendPerLodList)
 
     return reMesh
