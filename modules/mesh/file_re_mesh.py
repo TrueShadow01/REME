@@ -73,7 +73,25 @@ EXPORT_WILDS_DEBUG_FORCE_TYPING = 0
 # STREAMING DESCRIPTOR: buildWildsSingleFileBlend rebuilds the region with an sbh entry + streamingInfo
 # (binds a delta resource so the shape drives, but mis-reads the resident geometry). Testing whether the
 # inline tail alone is enough for the engine to find/bind the deltas now that the target-list crash is fixed.
-EXPORT_WILDS_BLEND_INLINE = True
+EXPORT_WILDS_BLEND_INLINE = False
+
+# When True, lay a normal-recalc section between the geometry and the deltas (matching vanilla's
+# [geom][normal-recalc][deltas] order) so the delta offset the engine computes from geom+NR size lands on
+# our deltas. This zeroes the recalc'd normals (mesh renders BLACK) because the adjacency format is
+# unreversed -- a diagnostic to test whether the missing NR gap is why the engine reads garbage deltas.
+# Set False for the shading-correct (but delta-misread) build.
+EXPORT_WILDS_NORMALRECALC = False
+
+# When True (STREAMING mode), lay the deltas at the resident buffer's BASE (offset 0) and shift the
+# geometry after them. The engine appears to read the resident delta resource from the buffer base
+# (ignoring word9), so geometry-at-0 (position floats) was being misread as packed deltas -> garbage +-Z.
+EXPORT_WILDS_DELTAS_FIRST = True
+
+# The resident delta path reads 8 bytes per vertex (the streamed format is 4): a position-delta u32 plus
+# a second u32 slot (a normal delta). With 4-byte deltas, vertex v reads at v*8 -> the upper half of each
+# region reads into the next region (arms got cloth deltas, cloth ran off the end). Emit 8 bytes/vertex:
+# the real 11/10/11 position delta + a zero second slot (no normal delta).
+EXPORT_WILDS_DELTA_STRIDE8 = True
 
 # Debug: when True, the resident base buffer is a small distinct stub (a handful of verts) instead of
 # a full copy of the streamed LOD0. The original keeps its lowest LOD (smaller than the blend region)
@@ -2393,7 +2411,14 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     else:
                         real = np.asarray(bs.deltas, dtype=np.float64).reshape(-1, 3)
                     full[portionOffset : portionOffset + vertCount] = real
-                    shapeArrays.append(packBlendShapeDeltas(full, aabb))
+                    packed = packBlendShapeDeltas(full, aabb)
+                    if EXPORT_WILDS_DELTA_STRIDE8:
+                        # 8 bytes/vertex: real position delta in the low u32, zero (no normal delta) in
+                        # the high u32, matching the resident path's read stride.
+                        expanded = np.zeros((len(packed) * 2,), dtype="<u4")
+                        expanded[0::2] = packed
+                        packed = expanded
+                    shapeArrays.append(packed)
                 chunk = np.concatenate(shapeArrays).astype("<u4").tobytes()
                 if DEBUG_STREAMING_BUILD:
                     print(
@@ -2618,6 +2643,26 @@ class sizeData:
         self.VERTEX_ELEMENT_SIZE = 8
 
 
+def buildWildsNormalRecalcTail(vertexCount, faceBytes, indexSize):
+    # Wilds blend meshes carry a GPU normal-recalc section between the geometry and the deltas: one
+    # IndexNormalRecalc (u16 index, u8, u8 adjacency) per FACE index, then one per VERTEX. The engine
+    # sizes the delta offset off it, so it must be present and correctly sized. The adjacency bytes are
+    # left 0 (format unreversed), which zeroes the recalc'd normals (black) -- acceptable for the delta
+    # diagnostic. Returns (faceArrayBytes, vertArrayBytes), each padded to 16.
+    indexCount = len(faceBytes) // indexSize
+    fmt = "<I" if indexSize == 4 else "<H"
+    fbuf = bytearray()
+    for k in range(indexCount):
+        vi = struct.unpack_from(fmt, faceBytes, k * indexSize)[0]
+        fbuf += struct.pack("<HBB", vi & 0xFFFF, 0, 0)
+    fbuf += b"\x00" * (-len(fbuf) % 16)
+    vbuf = bytearray()
+    for k in range(vertexCount):
+        vbuf += struct.pack("<HBB", k & 0xFFFF, 0, 0)
+    vbuf += b"\x00" * (-len(vbuf) % 16)
+    return bytes(fbuf), bytes(vbuf)
+
+
 def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
     # Single-file (resident) MH Wilds blend. Lays the blend submesh's geometry + normal-recalc + deltas
     # into the RESIDENT buffer (the 80-byte mesh header's buffer, read via vbi=0 from the base) and
@@ -2678,21 +2723,35 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     faces = inlineFace
     deltas = blendDeltaBytes or b""  # single LOD: all the delta bytes belong here
 
-    geomEnd = getPaddedPos(len(geom), 16)
-    geomPad = geomEnd - len(geom)
-    # No GPU normal-recalc section: emitting it (self-ref indices + zero adjacency) makes the recalc pass
-    # zero the normals -> the mesh renders all-black. Confirmed in-game that omitting it restores textures
-    # and shading and the mesh still loads/drives. word8(nrVertStart) collapses onto word9(deltaStart) at
-    # geomEnd, so the recalc region is empty and the deltas follow the geometry directly.
-    nrVertStart = geomEnd
-    deltaStart = geomEnd
-    residentBuf = bytearray(geom)
-    residentBuf += b"\x00" * geomPad
-    residentBuf += deltas
-    # 16-align the whole vertex buffer so vertexBufferLength (sbh word at +12) equals the padded size and
-    # the face buffer that follows sits exactly at bufferStart+vertexBufferLength (no 4-byte skew).
+    geomPadded = getPaddedPos(len(geom), 16)
+    deltaRegion = bytearray(deltas)
+    deltaRegion += b"\x00" * (-len(deltaRegion) % 16)
+    deltaPad = len(deltaRegion)
+    if EXPORT_WILDS_DELTAS_FIRST and deltas:
+        # The engine reads the resident delta resource from the buffer BASE (offset 0) -- it ignores
+        # word9 -- so the geometry-at-0 (position floats) was being read as packed deltas -> garbage +-Z
+        # on every vertex (both submeshes, both modes). Put the deltas at offset 0 and shift the geometry
+        # after them; bump every vertex-element offset by the delta region size so geometry still reads
+        # correctly via the standard header (vertexBufferOffset + posStartOffset).
+        elemShift = deltaPad
+        deltaStart = 0
+        nrVertStart = 0
+        geomEnd = deltaPad + geomPadded
+        residentBuf = bytearray(deltaRegion)
+        residentBuf += geom
+        residentBuf += b"\x00" * (geomPadded - len(geom))
+    else:
+        elemShift = 0
+        deltaStart = geomPadded
+        nrVertStart = geomPadded
+        geomEnd = geomPadded
+        residentBuf = bytearray(geom)
+        residentBuf += b"\x00" * (geomPadded - len(geom))
+        residentBuf += deltaRegion
+    # 16-align the whole vertex buffer so vertexBufferLength (sbh word +12) equals the padded size and the
+    # face buffer that follows sits exactly at bufferStart+vertexBufferLength (no 4-byte skew).
     residentBuf += b"\x00" * (-len(residentBuf) % 16)
-    vbl = len(residentBuf)  # vertex buffer length = geometry + tail (16-aligned; faces follow at vbl)
+    vbl = len(residentBuf)  # vertex buffer length = geometry + deltas (16-aligned; faces follow at vbl)
 
     M = reMesh.fileHeader.meshOffset
     entryCount = 1
@@ -2760,7 +2819,7 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
             eo = tableOff + j * 8
             sp("<H", buf, eo + 0, ve.typing)
             sp("<H", buf, eo + 2, ve.stride)
-            sp("<I", buf, eo + 4, ve.posStartOffset)
+            sp("<I", buf, eo + 4, ve.posStartOffset + elemShift)
     # resident vertex buffer (geometry + tail) + face buffer
     buf[baseVtxOff : baseVtxOff + len(residentBuf)] = residentBuf
     buf[baseFaceOff : baseFaceOff + len(faces)] = faces
