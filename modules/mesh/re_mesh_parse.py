@@ -459,19 +459,23 @@ def _decodeWildsBlendShapes(reMesh):
         subEntries = bt.subMeshEntryList if bt.subMeshEntryList else [bt]
         return subEntries, sum(getattr(sm, "vertCount", 0) for sm in subEntries)
 
-    def decodeTarget(tail, cur, bt, aabb, lodDict):
-        # Decode one blend target's dense block at offset cur; returns its byte length.
+    def decodeTarget(tail, cur, bt, aabb, lodDict, stride=4):
+        # Decode one blend target's dense block at offset cur; returns its byte length. stride=4 is the
+        # streamed format (one 11/10/11 u32 per vertex); stride=8 is the single-file resident format
+        # (position-delta u32 + an unused normal-delta u32 -- we read the low u32 of each pair).
         subEntries, totalVerts = targetVertCount(bt)
         blendShapeNum = bt.blendShapeNum
-        deltaBytes = blendShapeNum * totalVerts * 4
+        deltaBytes = blendShapeNum * totalVerts * stride
         if blendShapeNum == 0 or totalVerts == 0:
             return deltaBytes
         if cur < 0 or cur + deltaBytes > len(tail):
             return deltaBytes
-        u32 = np.frombuffer(tail[cur : cur + deltaBytes], dtype="<I")
-        if u32.size != blendShapeNum * totalVerts:
+        raw = np.frombuffer(tail[cur : cur + deltaBytes], dtype="<I")
+        if raw.size != blendShapeNum * totalVerts * (stride // 4):
             return deltaBytes
-        u32 = u32.reshape(blendShapeNum, totalVerts)
+        if stride == 8:
+            raw = raw.reshape(-1, 2)[:, 0]  # low u32 = position delta
+        u32 = raw.reshape(blendShapeNum, totalVerts)
         nx = (u32 & 0x7FF).astype(np.float32) / 2047.0
         ny = ((u32 >> 11) & 0x3FF).astype(np.float32) / 1023.0
         nz = ((u32 >> 21) & 0x7FF).astype(np.float32) / 2047.0
@@ -552,7 +556,32 @@ def _decodeWildsBlendShapes(reMesh):
             "targets": targets,
         }
 
-    if streamEntries:
+    residentDeltasFirst = (
+        bool(mbh.vertexElementList)
+        and mbh.vertexElementList[0].posStartOffset > 0
+        and mbh.vertexBuffer is not None
+    )
+    if residentDeltasFirst:
+        # Single-file resident blend (this addon's own export): the deltas live at the vertex-buffer BASE
+        # (offset 0), 8 bytes/vertex (low u32 = position delta), one dense block per (LOD, target) in
+        # order. The geometry was shifted AFTER the deltas (every element's posStartOffset bumped), which
+        # is the >0 first-element offset we detect here -- so ignore any streaming companion and read the
+        # deltas straight from the base buffer.
+        tail = mbh.vertexBuffer
+        cur = 0
+        for lodIndex, bsData in enumerate(bsh.blendShapeList):
+            lodDict = {}
+            for ti, bt in enumerate(bsData.blendTargetList):
+                cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict, stride=8)
+            if lodDict:
+                result[lodIndex] = lodDict
+                bt0 = bsData.blendTargetList[0] if bsData.blendTargetList else None
+                if bt0 is not None:
+                    subs0 = bt0.subMeshEntryList if bt0.subMeshEntryList else [bt0]
+                    baseStart = getattr(subs0[0], "subMeshVertexStartIndex", 0)
+                    reMesh.wildsBlendMeta.setdefault(lodIndex, {})[baseStart] = buildBlockMeta(bsData)
+        print(f"[BSIMP] single-file resident blend: read {sum(len(d) for d in result.values())} target group(s) at buffer base (stride 8)")
+    elif streamEntries:
         # Original game meshes: each LOD's targets are packed after a leading index/meshlet table in
         # that LOD's streaming vertex-buffer tail; 16-align the start to skip it (and trailing pad).
         for lodIndex, bsData in enumerate(bsh.blendShapeList):
