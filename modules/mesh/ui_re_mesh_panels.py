@@ -44,9 +44,6 @@ class OBJECT_PT_MeshObjectModePanel(Panel):
         layout.operator("re_mesh_cm.dump_mesh_structure", icon="CONSOLE")
         layout.operator("re_mesh_cm.patch_wilds_blend_deltas", icon="MOD_DATA_TRANSFER")
         layout.operator("re_mesh_cm.botch_streaming_geometry", icon="MOD_WARP")
-        row = layout.row(align=True)
-        row.prop(scene, "re_mesh_aabb_scale")
-        row.operator("re_mesh_cm.scale_blend_shape_aabb", text="", icon="FULLSCREEN_ENTER")
 
 
 class OBJECT_PT_MeshArmatureToolsPanel(Panel):

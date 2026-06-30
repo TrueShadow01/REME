@@ -1207,58 +1207,6 @@ def botchStreamingGeometryOnly(meshPath, shiftY):
     return True, msg
 
 
-def scaleBlendShapeAABB(meshPath, scale):
-    # Base-only blend experiment (no streaming touched). The streamed deltas are normalized 0..1 values
-    # dequantized as delta = aabbMin + n*(aabbMax-aabbMin); with the symmetric AABB (min=-max) this is
-    # delta = aabbMax*(2n-1), i.e. the deformation magnitude is LINEAR in aabbMax — and aabbMax lives in
-    # the blend block of the BASE file, which mods fully override. So multiplying every target's AABB by
-    # `scale` rescales every shape key's in-game deformation, using the game's own vanilla delta values.
-    # scale=2 -> twice the bend; scale=0 -> shape key goes flat. Writes ONLY the base file.
-    d = bytearray(open(meshPath, "rb").read())
-    if len(d) < 16 or struct.unpack_from("<I", d, 0)[0] != 1213416781:
-        return False, "Selected file is not a .mesh."
-
-    def u16(o):
-        return struct.unpack_from("<H", d, o)[0]
-
-    def u64(o):
-        return struct.unpack_from("<Q", d, o)[0]
-
-    bso = u64(40 + 5 * 8)  # blendShapesOffset
-    if not bso:
-        return False, "Selected mesh has no blend block (nothing to scale)."
-    count = u64(bso)  # one BlendShapeData per blend-carrying LOD
-    listStart = bso + 32
-    aabbFloatOffs = (0, 4, 8, 16, 20, 24)  # min.xyz then max.xyz (skip the .w padding at 12 and 28)
-    nBlocks = 0
-    nTargets = 0
-    for li in range(count):
-        block = u64(listStart + li * 8)
-        if not block:
-            continue
-        tc = u16(block)
-        aabbOff = u64(block + 24)
-        if not aabbOff:
-            continue
-        nBlocks += 1
-        for ti in range(tc):
-            ao = aabbOff + ti * 32
-            for fo in aabbFloatOffs:
-                v = struct.unpack_from("<f", d, ao + fo)[0]
-                struct.pack_into("<f", d, ao + fo, v * scale)
-            nTargets += 1
-    if nTargets == 0:
-        return False, "Blend block present but no target AABBs found."
-    open(meshPath, "wb").write(d)
-    msg = (
-        f"Scaled {nTargets} target AABB(s) across {nBlocks} blend block(s) by x{scale} in "
-        f"{os.path.basename(meshPath)} (base file only; streaming untouched). Equip in-game and check "
-        f"whether the existing correctives deform more/less."
-    )
-    print("[AABBSCALE] " + msg)
-    return True, msg
-
-
 class WM_OT_PatchWildsBlendDeltas(Operator):
     bl_label = "Patch Wilds Blend Deltas Into Streaming (Debug)"
     bl_idname = "re_mesh_cm.patch_wilds_blend_deltas"
@@ -1312,41 +1260,6 @@ class WM_OT_BotchStreamingGeometry(Operator):
             self.report({"ERROR"}, "No valid .mesh selected")
             return {"CANCELLED"}
         ok, msg = botchStreamingGeometryOnly(self.filepath, self.shiftY)
-        self.report({"INFO"} if ok else {"ERROR"}, msg)
-        return {"FINISHED"} if ok else {"CANCELLED"}
-
-    def invoke(self, context, event):
-        context.window_manager.fileselect_add(self)
-        return {"RUNNING_MODAL"}
-
-
-class WM_OT_ScaleBlendShapeAABB(Operator):
-    bl_label = "Scale Blend Shape AABB (base only, Debug)"
-    bl_idname = "re_mesh_cm.scale_blend_shape_aabb"
-    bl_description = (
-        "Base-only blend test: multiply every blend target's AABB by 'Scale' in the selected .mesh, "
-        "writing ONLY the base file (streaming untouched). Because the streamed deltas are dequantized "
-        "as delta = aabbMax*(2n-1), this linearly rescales every existing shape key's deformation using "
-        "the game's own delta values. Scale=2 doubles the bend, Scale=0 flattens it. Proves whether we "
-        "can change a shape key purely through the moddable base file"
-    )
-
-    filepath: StringProperty(subtype="FILE_PATH")
-    filter_glob: StringProperty(default="*.mesh*", options={"HIDDEN"})
-    scale: FloatProperty(
-        name="Scale",
-        description="Factor to multiply every blend target's AABB by (2 = double the deformation, 0 = flat)",
-        default=2.0,
-    )
-
-    def execute(self, context):
-        if not self.filepath or not os.path.isfile(self.filepath):
-            self.report({"ERROR"}, "No valid .mesh selected")
-            return {"CANCELLED"}
-        # The panel field (Scene.re_mesh_aabb_scale) is the visible control; fall back to the operator
-        # property if the scene prop isn't present for some reason.
-        scale = getattr(context.scene, "re_mesh_aabb_scale", self.scale)
-        ok, msg = scaleBlendShapeAABB(self.filepath, scale)
         self.report({"INFO"} if ok else {"ERROR"}, msg)
         return {"FINISHED"} if ok else {"CANCELLED"}
 

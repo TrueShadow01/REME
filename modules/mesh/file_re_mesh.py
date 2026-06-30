@@ -67,11 +67,6 @@ EXPORT_WILDS_BLEND_SHAPES = True
 # so this is left 0; set non-zero only to experiment.
 EXPORT_WILDS_DEBUG_FORCE_TYPING = 0
 
-# Debug: when True, export blend shapes with NO normal-recalc section (normalRecalcOffset=0, no tail
-# table). Tests whether the engine simply skips the normal-recalc pass when absent — if blend loads
-# without it, custom geometry never needs the (unreversed) adjacency format generated.
-EXPORT_WILDS_DEBUG_NO_NORMALRECALC = False
-
 # Debug: when True, the resident base buffer is a small distinct stub (a handful of verts) instead of
 # a full copy of the streamed LOD0. The original keeps its lowest LOD (smaller than the blend region)
 # resident, so the blend loader targets the streamed entry, not the resident. A full LOD0 copy gets
@@ -108,14 +103,6 @@ EXPORT_WILDS_DEBUG_PIGGYBACK_NAME = ""
 # Result (2026-06-22): body did NOT deform with a forced 0.3 offset on the 12 pose-driven correctives,
 # confirming the engine ignores mesh blend deltas for armor entirely. Kept off.
 EXPORT_WILDS_DEBUG_OVERRIDE_DELTA_OFFSET = 0
-
-# Debug delta-amplify (2026-06-25): multiply the STORED blend AABB by this factor while packing against
-# the tight AABB, so the in-game dequant (min + n*(max-min)) yields AMPLIFY x the real delta. Makes
-# subtle breathing/corrective shapes visibly distinguishable when driving channels one at a time -- the
-# tool for the faithful-vs-custom test: re-export an original multi-shape mesh single-file and check
-# whether each driven channel deforms DIFFERENTLY (works) or identically (aliases like our custom path).
-# Same math as the scaleBlendShapeAABB button, applied at export. 1.0 = no-op; set back to 1.0 after.
-EXPORT_WILDS_DEBUG_DELTA_AMPLIFY = 8.0
 
 
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
@@ -2289,19 +2276,6 @@ def packBlendShapeDeltas(deltaArray, aabb):
     return (xi | (yi << 11) | (zi << 21)).astype("<u4")
 
 
-def _amplifyBlendAABB(aabb):
-    # DEBUG visibility: pack stays against the tight AABB (correct normalized bytes); we only store a
-    # SCALED AABB so the in-game dequant yields AMPLIFY x the real delta. Returns a new AABB (leaves the
-    # one used for packing untouched). AMPLIFY == 1.0 is a no-op. See EXPORT_WILDS_DEBUG_DELTA_AMPLIFY.
-    k = EXPORT_WILDS_DEBUG_DELTA_AMPLIFY
-    if k == 1.0:
-        return aabb
-    out = AABB()
-    out.min.x, out.min.y, out.min.z = aabb.min.x * k, aabb.min.y * k, aabb.min.z * k
-    out.max.x, out.max.y, out.max.z = aabb.max.x * k, aabb.max.y * k, aabb.max.z * k
-    return out
-
-
 def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
     # Gather Blender-side blend shapes into per-LOD blend targets. Each submesh that has shape keys
     # becomes its own blend target (its own blendShapeNum / AABB / name range), so submeshes with
@@ -2369,7 +2343,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                         {
                             "blendShapeNum": mt["blendShapeNum"],
                             "subEntries3": subs3,
-                            "aabb": _amplifyBlendAABB(aabb),
+                            "aabb": aabb,
                             "blendSSIndex": ssIndex,
                         }
                     )
@@ -2420,7 +2394,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     {
                         "blendShapeNum": len(shapes),
                         "subEntries": list(mergedRegion),
-                        "aabb": _amplifyBlendAABB(aabb),
+                        "aabb": aabb,
                         "blendSSIndex": ssIndex,
                     }
                 )
@@ -2633,30 +2607,6 @@ class sizeData:
         self.VERTEX_ELEMENT_SIZE = 8
 
 
-def buildWildsNormalRecalcTail(vertexCount, faceBytes, indexSize):
-    # MH Wilds blend-shaped meshes run a GPU normal-recalculation pass over the deformed vertices, and
-    # it reads two index arrays from the front of the streaming entry's undeclared tail (before the
-    # blend deltas): one IndexNormalRecalc (u16 index, u8, u8) per FACE index, then one per vertex
-    # (this face-then-vertex order is what the original files use; the streamingBufferHeader offsets
-    # word8/word9 mark the boundaries). Without this section the engine allocates a zero-size buffer
-    # for the pass and crashes with D3D E_INVALIDARG the moment the mesh loads. The adjacency bytes
-    # (left/right) only affect normal quality during deformation, so we emit a correctly-sized section
-    # with valid in-range indices (real corner vertex for faces, self for verts) and zero adjacency.
-    # Returns (faceArrayBytes, vertArrayBytes), each padded to 16.
-    indexCount = len(faceBytes) // indexSize
-    fmt = "<I" if indexSize == 4 else "<H"
-    fbuf = bytearray()
-    for k in range(indexCount):
-        vi = struct.unpack_from(fmt, faceBytes, k * indexSize)[0]
-        fbuf += struct.pack("<HBB", vi & 0xFFFF, 0, 0)
-    fbuf += b"\x00" * (-len(fbuf) % 16)
-    vbuf = bytearray()
-    for k in range(vertexCount):
-        vbuf += struct.pack("<HBB", k & 0xFFFF, 0, 0)
-    vbuf += b"\x00" * (-len(vbuf) % 16)
-    return bytes(fbuf), bytes(vbuf)
-
-
 def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
     # Single-file (resident) MH Wilds blend. Lays the blend submesh's geometry + normal-recalc + deltas
     # into the RESIDENT buffer (the 80-byte mesh header's buffer, read via vbi=0 from the base) and
@@ -2683,33 +2633,46 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     if not lodGroup.meshGroupList or not lodGroup.meshGroupList[0].vertexInfoList:
         return False
 
-    firstSub = lodGroup.meshGroupList[0].vertexInfoList[0]
-    vStart = firstSub.vertexStartIndex
-    fStart = firstSub.faceStartIndex
+    # Use the MINIMUM vertex/face start across ALL submeshes, not meshGroupList[0]'s. The morph submesh
+    # can be listed first in the LOD while its vertices/faces sit AFTER the body's in the buffer; keying
+    # off group[0] then slices from the wrong base, so the body (lower indices) falls outside the copied
+    # range and renders as exploded garbage flying off, while the morph submesh -- sitting at the slice
+    # start -- still looks correct. min() handles any submesh ordering. vCount/fCount stay as the summed
+    # group counts (geometry is contiguous, so [min, min+count] spans the whole LOD).
+    allSubs = [sub for mg in lodGroup.meshGroupList for sub in mg.vertexInfoList]
+    vStart = min(s.vertexStartIndex for s in allSubs)
+    fStart = min(s.faceStartIndex for s in allSubs)
     vCount = sum(mg.vertexCount for mg in lodGroup.meshGroupList)
     fCount = sum(mg.faceCount for mg in lodGroup.meshGroupList)
+    if DEBUG_STREAMING_BUILD:
+        print(f"[SFBLEND] LOD0 groups={len(lodGroup.meshGroupList)} subs={len(allSubs)} "
+              f"vStart(min)={vStart} vCount={vCount} fStart(min)={fStart} fCount={fCount}")
+        for gi, mg in enumerate(lodGroup.meshGroupList):
+            for sub in mg.vertexInfoList:
+                print(f"[SFBLEND]   group{gi} sub vtxStart={sub.vertexStartIndex} "
+                      f"faceStart={sub.faceStartIndex} vbi={sub.vertexBufferIndex}")
 
-    geom = bytearray()
-    elemOffsets = []
-    for ve in elements:
-        elemOffsets.append(len(geom))
-        s = ve.stride
-        geom += inlineVtx[ve.posStartOffset + vStart * s : ve.posStartOffset + (vStart + vCount) * s]
-    faces = inlineFace[fStart * indexSize : (fStart + fCount) * indexSize]
+    # Use the geometry buffer VERBATIM. It already renders correctly through the normal export path; the
+    # previous element-by-element re-slice (which recomputed each element's offset) misplaced the Wilds
+    # extended-weight stream -> the body submesh (which uses it) exploded while the morph submesh (which
+    # doesn't) looked fine. Keep mbh.vertexBuffer/faceBuffer byte-for-byte and reuse each element's
+    # ORIGINAL posStartOffset; only the blend deltas get appended and a streaming descriptor wrapped
+    # around it. Single-LOD only, so the whole buffer is LOD0 and the submeshes' existing indices stay
+    # valid (no rebase needed).
+    geom = inlineVtx
+    faces = inlineFace
     deltas = blendDeltaBytes or b""  # single LOD: all the delta bytes belong here
 
     geomEnd = getPaddedPos(len(geom), 16)
     geomPad = geomEnd - len(geom)
-    if deltas and not EXPORT_WILDS_DEBUG_NO_NORMALRECALC:
-        nrFace, nrVert = buildWildsNormalRecalcTail(vCount, faces, indexSize)
-    else:
-        nrFace, nrVert = (b"", b"")
-    nrVertStart = geomEnd + len(nrFace)
-    deltaStart = nrVertStart + len(nrVert)
+    # No GPU normal-recalc section: emitting it (self-ref indices + zero adjacency) makes the recalc pass
+    # zero the normals -> the mesh renders all-black. Confirmed in-game that omitting it restores textures
+    # and shading and the mesh still loads/drives. word8(nrVertStart) collapses onto word9(deltaStart) at
+    # geomEnd, so the recalc region is empty and the deltas follow the geometry directly.
+    nrVertStart = geomEnd
+    deltaStart = geomEnd
     residentBuf = bytearray(geom)
     residentBuf += b"\x00" * geomPad
-    residentBuf += nrFace
-    residentBuf += nrVert
     residentBuf += deltas
     vbl = len(residentBuf)  # vertex buffer length = geometry + tail (== deltaStart + len(deltas))
 
@@ -2772,13 +2735,14 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     sp("<I", buf, siStructOff + 0, entryCount)
     sp("<I", buf, siStructOff + 4, 0)
     sp("<Q", buf, siStructOff + 8, M + siEntriesOff)
-    # base + per-entry vertex element declarations (geometry offsets within the resident buffer)
+    # base + per-entry vertex element declarations -- reuse each element's ORIGINAL offset into the
+    # (verbatim) geometry buffer so the engine reads geometry exactly as the working normal export does.
     for tableOff in (baseElemOff, streamVEOff):
         for j, ve in enumerate(elements):
             eo = tableOff + j * 8
             sp("<H", buf, eo + 0, ve.typing)
             sp("<H", buf, eo + 2, ve.stride)
-            sp("<I", buf, eo + 4, elemOffsets[j])
+            sp("<I", buf, eo + 4, ve.posStartOffset)
     # resident vertex buffer (geometry + tail) + face buffer
     buf[baseVtxOff : baseVtxOff + len(residentBuf)] = residentBuf
     buf[baseFaceOff : baseFaceOff + len(faces)] = faces
@@ -2787,15 +2751,14 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     reMesh.isStreamed = True
     reMesh.streamInBase = False  # all data is inside the mesh region; no separate companion append
     reMesh.streamingBytes = b""
-    # submeshes read from the resident buffer (vbi=0), with LOD-relative indices
+    # submeshes read from the resident buffer (vbi=0). The buffer is kept verbatim (full LOD0), so the
+    # existing vertex/face start indices remain valid -- only the buffer index changes.
     for mg in lodGroup.meshGroupList:
         for sub in mg.vertexInfoList:
             sub.vertexBufferIndex = 0
-            sub.vertexStartIndex -= vStart
-            sub.faceStartIndex -= fStart
     if DEBUG_STREAMING_BUILD:
         print(
-            f"[SFBLEND] resident vbi=0: geom={len(geom)} nrFace={len(nrFace)} nrVert={len(nrVert)} "
+            f"[SFBLEND] resident vbi=0: geom={len(geom)} (no normal-recalc) "
             f"deltas={len(deltas)} vbl={vbl} faces={baseFaceSize} word8nrVert={nrVertStart} "
             f"word9deltaStart={deltaStart} streamingInfoEntries={entryCount} fileSize={reMesh.fileHeader.fileSize}"
         )
@@ -3223,18 +3186,6 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
         reMesh.boneBoundingBoxHeader.offset = currentOffset + sd.AABB_OFFSET
         currentOffset += (
             sd.AABB_OFFSET + reMesh.boneBoundingBoxHeader.count * sd.AABB_SIZE
-        )
-
-    # MH Wilds normal-recalc header (16-byte stub) — present whenever the mesh has blend shapes. The
-    # per-vertex/per-face index arrays live in the resident buffer (built by buildWildsSingleFileBlend,
-    # located via the streaming-buffer-header word8=nrVertStart); this header just marks the section
-    # present (normalRecalcOffset). Without it a from-scratch blend armor (no vanilla stream to supply
-    # NR) crashes the GPU normal-recalc pass with D3D E_INVALIDARG.
-    if blendPerLodList is not None and not EXPORT_WILDS_DEBUG_NO_NORMALRECALC:
-        reMesh.fileHeader.normalRecalcOffset = currentOffset
-        reMesh.normalRecalcRegionBytes = struct.pack("<IQhh", 1, 0, 0, 0)  # blockCount=1, dataOffset=0
-        currentOffset = getPaddedPos(
-            currentOffset + len(reMesh.normalRecalcRegionBytes), 16
         )
 
     # MH Wilds blend shape struct region (header + per-LOD data), placed before the mesh buffer.

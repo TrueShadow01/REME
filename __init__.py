@@ -86,7 +86,6 @@ from .modules.mesh.re_mesh_export_errors import (
 )
 from .modules.mesh.re_mesh_operators import (
     WM_OT_BotchStreamingGeometry,
-    WM_OT_ScaleBlendShapeAABB,
     WM_OT_CreateMeshCollection,
     WM_OT_DeleteLoose,
     WM_OT_DumpMeshStructure,
@@ -1993,7 +1992,6 @@ classes = [
     WM_OT_DumpMeshStructure,
     WM_OT_PatchWildsBlendDeltas,
     WM_OT_BotchStreamingGeometry,
-    WM_OT_ScaleBlendShapeAABB,
     WM_OT_OpenTextureCacheFolder,
     WM_OT_ClearTextureCacheFolder,
     WM_OT_CheckTextureCacheSize,
@@ -2250,12 +2248,6 @@ def register():
     bpy.types.WindowManager.enableModFileTracking = bpy.props.BoolProperty(
         default=False
     )
-    bpy.types.Scene.re_mesh_aabb_scale = bpy.props.FloatProperty(
-        name="Blend AABB Scale",
-        description="Factor the 'Scale Blend Shape AABB' button multiplies every blend target's AABB by "
-        "(2 = double the deformation, 0 = flatten, negative = invert). Base file only",
-        default=2.0,
-    )
     bpy.types.Scene.re_mdf_toolpanel = PointerProperty(type=MDFToolPanelPropertyGroup)
     bpy.types.Scene.re_modworkspace_toolpanel = PointerProperty(
         type=ModWorkspaceToolPanelPropertyGroup_CM
@@ -2288,7 +2280,6 @@ def register():
 
 def unregister():
     del bpy.types.WindowManager.enableModFileTracking
-    del bpy.types.Scene.re_mesh_aabb_scale
     for classEntry in classes:
         bpy.utils.unregister_class(classEntry)
 
