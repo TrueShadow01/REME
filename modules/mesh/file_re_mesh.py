@@ -2458,10 +2458,20 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
     for lod in perLodList:
         targets = lod["targets"]
         nTargets = len(targets)
+        # The engine iterates (targetCount + typing) target records (decompiled load loop:
+        # `while uVar11 != puVar4[0] + puVar4[1]`, where puVar4 = the per-LOD BlendShapeData and
+        # [+0]=targetCount, [+2]=typing). Vanilla physically allocates that many target slots: the real
+        # targets first, then `typing` PADDING slots (verified vs ch03_090_0012: 5 real + 3 pad = 8, the
+        # pad slots having flag(+7)=0, shapeNum=0). Writing only nTargets slots makes the engine walk past
+        # our data into garbage and AV on the bogus subEntry pointer (crash at +0xAB1188C). So reserve the
+        # full padded count; the pad slots stay zeroed (flag=0, subMeshEntryCount=0) so the inner
+        # sub-entry loop is skipped and nothing is dereferenced.
+        typingVal = lod.get("typing") or EXPORT_WILDS_DEBUG_FORCE_TYPING or (3 if nTargets > 1 else 7)
+        paddedTargetCount = nTargets + typingVal
         dataStructOff = cur
         cur += 48
         targetListOff = cur
-        cur += 16 * nTargets
+        cur += 16 * paddedTargetCount
         subOffsets = []
         for t in targets:
             subOffsets.append(cur)
@@ -2481,6 +2491,7 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
                 "aabbOff": aabbOff,
                 "blendSOff": blendSOff,
                 "blendSSOff": blendSSOff,
+                "typingVal": typingVal,
             }
         )
     buf = bytearray(cur)
@@ -2511,8 +2522,9 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
         # multi-target block the runtime allocated channels for target[0] only (12 of 13). Use 3 when
         # there's more than one target so every target's shapes get channels.
         struct.pack_into("<H", buf, d + 0, nTargets)  # targetCount
-        # Faithful typing from the captured block wins; else the debug force; else the nTargets rule.
-        typingVal = lod.get("typing") or EXPORT_WILDS_DEBUG_FORCE_TYPING or (3 if nTargets > 1 else 7)
+        # typing = padding-slot count (already chosen in the layout pass and the target list reserved for
+        # nTargets+typing entries; the trailing `typing` slots are left zeroed = flag0/subEntryCount0).
+        typingVal = lay["typingVal"]
         struct.pack_into("<H", buf, d + 2, typingVal)  # typing
         struct.pack_into("<I", buf, d + 4, (totalShapes << 16) | (firstSSIndex & 0xFFFF))  # unknFlag
         struct.pack_into("<I", buf, d + 8, 0)  # padding1
