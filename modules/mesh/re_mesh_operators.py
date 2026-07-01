@@ -85,6 +85,9 @@ class WM_OT_RemoveZeroWeightVertexGroups(Operator):
 		else:
 			selection = bpy.context.scene.objects
 		for obj in selection:
+			if obj.type != "MESH":
+				continue
+
 			emptyGroupList = []
 			for vertexGroup in obj.vertex_groups:
 				if not any(vertexGroup.index in [g.group for g in v.groups] for v in obj.data.vertices):
