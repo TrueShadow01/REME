@@ -52,9 +52,10 @@ class WM_OT_RenameMeshToREFormat(Operator):
 					try:
 						groupID = int(selectedObj.name.split("Group_")[1].split("_")[0])
 					except:
-						pass
+						print(f"Could not parse group ID in {selectedObj.name}, setting to 0")
+						groupID = 0
 				else:
-					print("Could not parse group ID in {selectedObj.name}, setting to 0")
+					print(f"Could not parse group ID in {selectedObj.name}, setting to 0")
 					groupID = 0
 				if groupID not in groupIndexDict:
 					groupIndexDict[groupID] = 0
