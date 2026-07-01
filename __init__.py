@@ -317,11 +317,16 @@ class RemoveItemOperator(bpy.types.Operator):
     bl_label = "Remove Selected Path"
 
     def execute(self, context):
+        prefs = bpy.context.preferences.addons[__name__].preferences
+        chunkList = prefs.chunkPathList_items
+
+        if len(chunkList) == 0:
+            return {'CANCELLED'}
         
-        chunkList = bpy.context.preferences.addons[__name__].preferences.chunkPathList_items
-        index = bpy.context.preferences.addons[__name__].preferences.chunkPathList_index
+        index = min(max(0, prefs.chunkPathList_index), len(chunkList) - 1)
         chunkList.remove(index)
-        bpy.context.preferences.addons[__name__].preferences.chunkPathList_index = min(max(0, index - 1), len(chunkList) - 1)
+        prefs.chunkPathList_index = min(max(0, index - 1), len(chunkList) - 1)
+        
         return {'FINISHED'}
 
 # Operator to reorder items in the list
