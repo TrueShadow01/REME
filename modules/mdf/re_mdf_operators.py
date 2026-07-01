@@ -167,12 +167,20 @@ class WM_OT_SavePreset(Operator):
 		return {'FINISHED'}	
 	
 def update_findValueCount(self, context):
-	if context.active_object.get("~TYPE") == "RE_MDF_MATERIAL":
-		material = context.active_object.re_mdf_material
-		replaceCount = 0
-		for entry in material.textureBindingList_items:
-			replaceCount += entry.path.count(self.findValue)
-		self.instanceCount = replaceCount
+	obj = context.active_object if context else None
+
+	if obj is None or obj.get("~TYPE") != "RE_MDF_MATERIAL":
+		self.instanceCount = 0
+		return
+	
+	material = obj.re_mdf_material
+	replaceCount = 0
+
+	for entry in material.textureBindingList_items:
+		replaceCount += entry.path.count(self.findValue)
+	
+	self.instanceCount = replaceCount
+
 class WM_OT_FindReplaceTextureBindings(Operator):
 	bl_label = "Find and Replace"
 	bl_idname = "re_mdf.replace_texture_bindings"
