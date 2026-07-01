@@ -2,7 +2,7 @@
 bl_info = {
     "name": "RE Mesh Editor (Community Maintained)",
     "author": "NSA Cloud, TrueShadow",
-    "version": (0, 67, 8),
+    "version": (0, 67, 15),
     "blender": (4, 3, 2),
     "location": "File > Import-Export",
     "description": "Import and export RE Engine Mesh files natively into Blender. No Noesis required.",
@@ -359,7 +359,7 @@ class ReorderItemOperator(bpy.types.Operator):
         if neighbor < 0 or neighbor >= len(chunkList):
             return {'CANCELLED'}
 
-        chunkList.move(neighbor, index)
+        chunkList.move(index, neighbor)
         prefs.chunkPathList_index = neighbor
         
         return {'FINISHED'}
@@ -620,7 +620,7 @@ class REMeshPreferences(AddonPreferences):
         if self.textureCacheCheckDate == "":
             checkTextureCacheSize()
         row.label(text=f"Cache Size: {self.textureCacheSizeString}")
-        row.operator("re_mesh_cm_cm.check_texture_cache_size",icon = "FILE_REFRESH",text = "")
+        row.operator("re_mesh_cm.check_texture_cache_size",icon = "FILE_REFRESH",text = "")
         box.label(text=f"Last Checked: {self.textureCacheCheckDate}")
         
         
