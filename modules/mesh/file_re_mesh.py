@@ -2244,14 +2244,46 @@ def packBlendShapeDeltas(deltaArray, aabb):
     return (xi | (yi << 11) | (zi << 21)).astype("<u4")
 
 
-def packBlendShapeDeltasStride8(deltaArray, aabb):
+def packBlendShapeDeltasStride8(deltaArray, aabb, normals=None):
     # The resident single-file blend path reads 8 bytes per vertex: the 11/10/11 position delta in the low
-    # u32 and a second u32 (a normal delta) which we leave 0. Returns a u32 array twice as long, interleaved
-    # [pos0, 0, pos1, 0, ...].
-    packed = packBlendShapeDeltas(deltaArray, aabb)
-    expanded = np.zeros((len(packed) * 2,), dtype="<u4")
-    expanded[0::2] = packed
+    # u32 and an ABSOLUTE 11/10/11 normal in the high u32. The engine blends base->slot by the shape
+    # weight, so a midpoint (zero) slot collapses the normal to (0,0,0) and the mesh darkens as the shape
+    # drives. Pass the per-vertex base (or deformed) normal (unit vector, encoded over [-1,1]) to keep
+    # shading correct. normals=None falls back to the midpoint. Returns [pos0, nrm0, pos1, nrm1, ...].
+    posPacked = packBlendShapeDeltas(deltaArray, aabb)
+    if normals is None:
+        nrmPacked = np.full(len(posPacked), 0x80100400, dtype="<u4")  # midpoint (unshaded fallback)
+    else:
+        nrm = np.clip(np.asarray(normals, dtype=np.float64).reshape(-1, 3), -1.0, 1.0)
+        # Encode the normal in the SAME format the geometry's norTan buffer uses: three signed int8
+        # components = floor(n*127), packed [nx][ny][nz][0] into the u32. The game provably reads geometry
+        # normals this way; the 11/10/11 layout (used for the position delta) produced scattered dark
+        # specular, so the slot is almost certainly a standard int8 vertex normal.
+        ni = np.clip(np.floor(nrm * 127.0).astype(np.int32), -127, 127)
+        b0 = (ni[:, 0] & 0xFF).astype(np.uint32)
+        b1 = (ni[:, 1] & 0xFF).astype(np.uint32)
+        b2 = (ni[:, 2] & 0xFF).astype(np.uint32)
+        nrmPacked = (b0 | (b1 << 8) | (b2 << 16)).astype("<u4")
+    expanded = np.empty((len(posPacked) * 2,), dtype="<u4")
+    expanded[0::2] = posPacked
+    expanded[1::2] = nrmPacked
     return expanded
+
+
+def computeVertexNormals(positions, faceList):
+    # Area-weighted per-vertex normals from positions + triangles (submesh-local indices). Used to measure
+    # the normal change a shape's deltas induce (recompute(base) vs recompute(base+delta)); that change is
+    # added to the smooth base normal so the resident normal slot follows the deformed surface.
+    P = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    faces = np.asarray(faceList, dtype=np.int64).reshape(-1, 3)
+    normals = np.zeros_like(P)
+    fn = np.cross(P[faces[:, 1]] - P[faces[:, 0]], P[faces[:, 2]] - P[faces[:, 0]])  # area-weighted
+    np.add.at(normals, faces[:, 0], fn)
+    np.add.at(normals, faces[:, 1], fn)
+    np.add.at(normals, faces[:, 2], fn)
+    ln = np.linalg.norm(normals, axis=1, keepdims=True)
+    ln[ln == 0] = 1.0
+    return normals / ln
 
 
 def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
@@ -2276,7 +2308,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
             for sm in viscon.subMeshList:
                 subData = parsedSubMeshToSubMeshDataDict.get(sm)
                 startIdx = subData.vertexStartIndex if subData is not None else 0
-                allSubs.append((startIdx, len(sm.vertexPosList)))
+                allSubs.append((startIdx, len(sm.vertexPosList), sm))
                 shapes = getattr(sm, "blendShapeList", None)
                 if not shapes:
                     continue
@@ -2336,20 +2368,56 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
             # whole region, its real deltas landing in its own portion (offset = its start - region base).
             allSubs.sort(key=lambda sc: sc[0])
             regionBase = allSubs[0][0]
-            mergedRegion = [(s, c) for (s, c) in allSubs]
-            totalRegionVerts = sum(c for (_s, c) in allSubs)
+            mergedRegion = [(s, c) for (s, c, _sm) in allSubs]
+            totalRegionVerts = sum(c for (_s, c, _sm) in allSubs)
+            # Base per-vertex normals across the WHOLE region (same for every shape). The resident delta's
+            # high u32 is an ABSOLUTE normal the engine blends base->slot by weight, so it must carry a real
+            # normal or the mesh darkens when the shape is driven. (Deformed-per-shape normals are a later
+            # refinement; base normals are correct for small deforms.)
+            regionNormals = np.zeros((totalRegionVerts, 3), dtype=np.float64)
+            for s, c, subm in allSubs:
+                nl = getattr(subm, "normalList", None)
+                if nl is not None and len(nl) >= c:
+                    regionNormals[s - regionBase : s - regionBase + c] = (
+                        np.asarray(nl, dtype=np.float64).reshape(-1, 3)[:c]
+                    )
             for startIdx, vertCount, shapes, sm in blendSubs:
                 aabb = computeBlendShapeAABB([bs.deltas for bs in shapes])
                 ssIndex = len(blendNames)
                 for bs in shapes:
                     blendNames.append(bs.blendShapeName)
                 portionOffset = startIdx - regionBase
+                # For the deformed-normal slot: my own area-weighted recompute of the base surface, to
+                # difference against the deformed one (keeps the smooth base normal + the deformation's
+                # orientation change). faceList indices are submesh-local.
+                basePos = np.asarray(sm.vertexPosList, dtype=np.float64).reshape(-1, 3)
+                faceList = getattr(sm, "faceList", None)
+                baseNflat = None
+                if faceList is not None and len(faceList):
+                    try:
+                        # faceList indices must be submesh-local (0..vertCount-1) for this recompute.
+                        if int(np.asarray(faceList).max()) < len(basePos):
+                            baseNflat = computeVertexNormals(basePos, faceList)
+                        elif DEBUG_STREAMING_BUILD:
+                            print("[BSEXP] faceList not submesh-local; deformed normal skipped (base normals used)")
+                    except Exception as e:
+                        if DEBUG_STREAMING_BUILD:
+                            print(f"[BSEXP] deformed-normal recompute failed ({e}); base normals used")
                 shapeArrays = []
                 for bs in shapes:
                     full = np.zeros((totalRegionVerts, 3), dtype=np.float64)
                     real = np.asarray(bs.deltas, dtype=np.float64).reshape(-1, 3)
                     full[portionOffset : portionOffset + vertCount] = real
-                    shapeArrays.append(packBlendShapeDeltasStride8(full, aabb))
+                    shapeNormals = regionNormals
+                    if baseNflat is not None:
+                        # deformed normal = smooth base normal + (recompute(base+delta) - recompute(base))
+                        defNflat = computeVertexNormals(basePos + real, faceList)
+                        slotN = regionNormals[portionOffset : portionOffset + vertCount] + (defNflat - baseNflat)
+                        ln = np.linalg.norm(slotN, axis=1, keepdims=True)
+                        ln[ln == 0] = 1.0
+                        shapeNormals = regionNormals.copy()
+                        shapeNormals[portionOffset : portionOffset + vertCount] = slotN / ln
+                    shapeArrays.append(packBlendShapeDeltasStride8(full, aabb, shapeNormals))
                 chunk = np.concatenate(shapeArrays).astype("<u4").tobytes()
                 if DEBUG_STREAMING_BUILD:
                     print(
