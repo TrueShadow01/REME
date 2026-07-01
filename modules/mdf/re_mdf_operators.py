@@ -129,6 +129,8 @@ class WM_OT_ApplyMDFToMeshCollection(Operator):
 			self.report({"INFO"},"Applied MDF to mesh collection.")
 		else:
 			self.report({"ERROR"},"Invalid mesh or MDF collection.")
+			return {'CANCELLED'}
+		
 		return {'FINISHED'}
 class WM_OT_OpenPresetFolder(Operator):
 	bl_label = "Open Preset Folder"
