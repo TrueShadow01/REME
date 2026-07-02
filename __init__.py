@@ -236,9 +236,6 @@ def setMeshExportDefaults(self):
     self.exportAllLODs = bpy.context.preferences.addons[
         __name__
     ].preferences.default_exportAllLODs
-    self.exportBlendShapes = bpy.context.preferences.addons[
-        __name__
-    ].preferences.default_exportBlendShapes
     self.rotate90 = bpy.context.preferences.addons[
         __name__
     ].preferences.default_rotate90export
@@ -684,11 +681,6 @@ class REMeshPreferences(AddonPreferences):
         description="Export all LODs. If disabled, only LOD0 will be exported. Note that LODs meshes must be grouped inside a collection for each level and that collection must be contained in another collection. See a mesh with LODs imported for reference on how it should look. A target collection must also be set",
         default=True,
     )
-    default_exportBlendShapes: BoolProperty(
-        name="Export Blend Shapes (MH Wilds, experimental)",
-        description="Default for the 'Export Blend Shapes' export option. EXPERIMENTAL: the blend data must ship in a PAK (loose streaming files are ignored by the game) and may not deform / may crash in-game. Leave OFF for normal geometry-only exports — geometry export is unaffected by this option",
-        default=False,
-    )
     default_rotate90export: BoolProperty(
         name="Convert Z Up To Y Up",
         description="Rotates objects 90 degrees for export. Leaving this option enabled is recommended",
@@ -753,7 +745,7 @@ class REMeshPreferences(AddonPreferences):
             checkTextureCacheSize()
         row.label(text=f"Cache Size: {self.textureCacheSizeString}")
         row.operator(
-            "re_mesh_cm_cm.check_texture_cache_size", icon="FILE_REFRESH", text=""
+            "re_mesh_cm.check_texture_cache_size", icon="FILE_REFRESH", text=""
         )
         box.label(text=f"Last Checked: {self.textureCacheCheckDate}")
 
@@ -795,7 +787,6 @@ class REMeshPreferences(AddonPreferences):
         if self.showExportOptions:
             column2.prop(self, "default_selectedOnly")
             column2.prop(self, "default_exportAllLODs")
-            column2.prop(self, "default_exportBlendShapes")
             column2.prop(self, "default_autoSolveRepeatedUVs")
             column2.prop(self, "default_preserveSharpEdges")
             column2.prop(self, "default_rotate90export")
@@ -1207,11 +1198,6 @@ class ExportREMesh(Operator, ExportHelper):
         description="Export all LODs. If disabled, only LOD0 will be exported. Note that LODs meshes must be grouped inside a collection for each level and that collection must be contained in another collection. See a mesh with LODs imported for reference on how it should look. A target collection must also be set",
         default=True,
     )
-    exportBlendShapes: BoolProperty(
-        name="Export Blend Shapes (MH Wilds, experimental)",
-        description="Exports shape keys as MH Wilds blend shapes if present. EXPERIMENTAL: the blend data must ship in a PAK (loose streaming files are ignored by the game) and may not deform / may crash in-game. Leave OFF for normal geometry-only exports — geometry export is unaffected by this option",
-        default=False,
-    )
     rotate90: BoolProperty(
         name="Convert Z Up To Y Up",
         description="Rotates objects 90 degrees for export. Leaving this option enabled is recommended",
@@ -1351,7 +1337,6 @@ class ExportREMesh(Operator, ExportHelper):
         layout.prop(self, "selectedOnly")
         layout.label(text="Advanced Options")
         layout.prop(self, "exportAllLODs")
-        layout.prop(self, "exportBlendShapes")
         # hasREToolbox = hasattr(bpy.types, "OBJECT_PT_re_tools_quick_export_panel")
         row = layout.row()
         # row.enabled = hasREToolbox
@@ -1370,7 +1355,6 @@ class ExportREMesh(Operator, ExportHelper):
             "targetCollection": self.targetCollection,
             "selectedOnly": self.selectedOnly,
             "exportAllLODs": self.exportAllLODs,
-            "exportBlendShapes": self.exportBlendShapes,
             "rotate90": self.rotate90,
             "useBlenderMaterialName": self.useBlenderMaterialName,
             "preserveBoneMatrices": self.preserveBoneMatrices,
@@ -1415,9 +1399,6 @@ class ExportREMesh(Operator, ExportHelper):
                 bpy.data.collections[self.targetCollection]["BatchExport_rotate90"] = (
                     self.rotate90
                 )
-                bpy.data.collections[self.targetCollection][
-                    "BatchExport_exportBlendShapes"
-                ] = self.exportBlendShapes
                 bpy.data.collections[self.targetCollection][
                     "BatchExport_useBlenderMaterialName"
                 ] = self.useBlenderMaterialName

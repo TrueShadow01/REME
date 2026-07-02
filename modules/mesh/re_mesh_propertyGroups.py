@@ -65,11 +65,6 @@ class ExporterNodePropertyGroup(bpy.types.PropertyGroup):
         description="Export all LODs. If disabled, only LOD0 will be exported. Note that LODs meshes must be grouped inside a collection for each level and that collection must be contained in another collection. See a mesh with LODs imported for reference on how it should look. A target collection must also be set",
         default=True,
     )
-    exportBlendShapes: BoolProperty(
-        name="Export Blend Shapes (MH Wilds, experimental)",
-        description="Exports shape keys as MH Wilds blend shapes if present. EXPERIMENTAL: the blend data must ship in a PAK (loose streaming files are ignored by the game) and may not deform / may crash in-game. Leave OFF for normal geometry-only exports — geometry export is unaffected by this option",
-        default=False,
-    )
     rotate90: BoolProperty(
         name="Convert Z Up To Y Up",
         description="Rotates objects 90 degrees for export. Leaving this option enabled is recommended",

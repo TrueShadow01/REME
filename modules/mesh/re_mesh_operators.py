@@ -341,10 +341,6 @@ def populateCollectionList(itemList, collection, recursionLevel, parentName):
                         "BatchExport_preserveSharpEdges"
                     ]
                     item.rotate90 = collection["BatchExport_rotate90"]
-                    if "BatchExport_exportBlendShapes" in collection:
-                        item.exportBlendShapes = collection[
-                            "BatchExport_exportBlendShapes"
-                        ]
                     item.useBlenderMaterialName = collection[
                         "BatchExport_useBlenderMaterialName"
                     ]
@@ -453,7 +449,6 @@ class WM_OT_REBatchExporter(Operator):
                         filepath=exportItem.path,
                         targetCollection=exportItem.name,
                         exportAllLODs=exportItem.exportAllLODs,
-                        exportBlendShapes=exportItem.exportBlendShapes,
                         autoSolveRepeatedUVs=exportItem.autoSolveRepeatedUVs,
                         preserveSharpEdges=exportItem.preserveSharpEdges,
                         rotate90=exportItem.rotate90,
@@ -678,7 +673,6 @@ class WM_OT_REBatchExporter(Operator):
                     )
                 if item.exportType == "MESH":
                     box.prop(item, "exportAllLODs")
-                    box.prop(item, "exportBlendShapes")
                     box.prop(item, "autoSolveRepeatedUVs")
                     box.prop(item, "preserveSharpEdges")
                     box.prop(item, "rotate90")

@@ -2094,13 +2094,27 @@ def exportREMeshFile(filePath, options):
                                 currentVertIndex
                             ] = list(pad(secondaryWeightIndicesList, size=8, padding=0))
 
-                # MH Wilds-era blend shape (shape key) export. Read shape keys from the original
-                # object and store per-vertex deltas in game space, matching the exported vertex
-                # order (evaluatedSubMeshData.vertices[i]). Encoded later in ParsedREMeshToREMesh.
+                # MH Wilds-era blend shape (shape key) export. Whenever a submesh carries shape keys
+                # they are exported automatically as blend shapes (no user toggle); meshes without
+                # shape keys are unaffected. Read shape keys from the original object and store
+                # per-vertex deltas in game space, matching the exported vertex order
+                # (evaluatedSubMeshData.vertices[i]). Encoded later in ParsedREMeshToREMesh.
+                if (
+                    rawsubmesh.data.shape_keys is not None
+                    and len(rawsubmesh.data.shape_keys.key_blocks) > 1
+                    and not (
+                        EXPORT_WILDS_BLEND_SHAPES
+                        and meshVersion in PACKED_BLEND_SHAPE_MESH_VERSIONS
+                    )
+                ):
+                    print(
+                        f"'{rawsubmesh.name}' has {len(rawsubmesh.data.shape_keys.key_blocks) - 1} "
+                        f"shape key(s) but mesh version {meshVersion} does not support blend-shape "
+                        f"export; exporting geometry only."
+                    )
                 if (
                     EXPORT_WILDS_BLEND_SHAPES
                     and meshVersion in PACKED_BLEND_SHAPE_MESH_VERSIONS
-                    and options.get("exportBlendShapes", True)
                     and rawsubmesh.data.shape_keys is not None
                     and len(rawsubmesh.data.shape_keys.key_blocks) > 1
                 ):
@@ -2108,6 +2122,7 @@ def exportREMeshFile(filePath, options):
                     basisBlock = keyBlocks[0]
                     skVertCount = len(evaluatedSubMeshData.vertices)
                     if len(basisBlock.data) == skVertCount:
+                        print(f"Exporting {len(keyBlocks) - 1} blend shape(s) on {rawsubmesh.name}")
                         # Deltas transform by the rotation/scale (3x3) of the submesh world matrix,
                         # the same transform applied to the vertex positions (translation cancels).
                         blendRot = np.array(subMeshWorldMatrix.to_3x3())
@@ -2136,6 +2151,12 @@ def exportREMeshFile(filePath, options):
                     else:
                         raiseWarning(
                             f"Shape key vertex count mismatch on {rawsubmesh.name}; skipping blend shape export."
+                        )
+                        print(
+                            f"Blend shape SKIPPED on {rawsubmesh.name}: shape-key basis has "
+                            f"{len(basisBlock.data)} vertices but the exported (evaluated) mesh has "
+                            f"{skVertCount}. A modifier is changing the vertex count -- apply or remove "
+                            f"vertex-count-changing modifiers before export."
                         )
 
                 visconGroup.subMeshList.append(parsedSubMesh)
