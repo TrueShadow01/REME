@@ -85,11 +85,8 @@ from .modules.mesh.re_mesh_export_errors import (
     WM_OT_ShowREMeshErrorWindow,
 )
 from .modules.mesh.re_mesh_operators import (
-    WM_OT_BotchStreamingGeometry,
     WM_OT_CreateMeshCollection,
     WM_OT_DeleteLoose,
-    WM_OT_DumpMeshStructure,
-    WM_OT_PatchWildsBlendDeltas,
     WM_OT_LimitTotalNormalizeAll,
     WM_OT_QuickBatchExport,
     WM_OT_REBatchExporter,
@@ -1989,9 +1986,6 @@ classes = [
     WM_OT_RemoveZeroWeightVertexGroups,
     WM_OT_LimitTotalNormalizeAll,
     WM_OT_CreateMeshCollection,
-    WM_OT_DumpMeshStructure,
-    WM_OT_PatchWildsBlendDeltas,
-    WM_OT_BotchStreamingGeometry,
     WM_OT_OpenTextureCacheFolder,
     WM_OT_ClearTextureCacheFolder,
     WM_OT_CheckTextureCacheSize,

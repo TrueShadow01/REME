@@ -459,7 +459,7 @@ def _decodeWildsBlendShapes(reMesh):
         subEntries = bt.subMeshEntryList if bt.subMeshEntryList else [bt]
         return subEntries, sum(getattr(sm, "vertCount", 0) for sm in subEntries)
 
-    def decodeTarget(tail, cur, bt, aabb, lodDict, stride=4):
+    def decodeTarget(tail, cur, bt, aabb, lodDict, stride=4, splitBySubmesh=False):
         # Decode one blend target's dense block at offset cur; returns its byte length. stride=4 is the
         # streamed format (one 11/10/11 u32 per vertex); stride=8 is the single-file resident format
         # (position-delta u32 + an unused normal-delta u32 -- we read the low u32 of each pair).
@@ -492,6 +492,29 @@ def _decodeWildsBlendShapes(reMesh):
         span = lastEnd - baseStart
         for s in range(blendShapeNum):
             name = shapeName(ssBase + s)
+            if splitBySubmesh:
+                # Assign this shape to the submesh whose slice actually carries deltas (the others are the
+                # zero padding our merged-region export adds), keyed under THAT submesh's start with only
+                # its slice, so it lands on the right Blender mesh instead of all on the first one.
+                vOff = 0
+                chosenSm = None
+                chosenSeg = None
+                chosenMag = -1.0
+                for sm in subEntries:
+                    cnt = getattr(sm, "vertCount", 0)
+                    seg = deltas[s, vOff : vOff + cnt]
+                    mag = float(np.abs(seg).sum())
+                    if mag > chosenMag:
+                        chosenMag, chosenSm, chosenSeg = mag, sm, seg
+                    vOff += cnt
+                if chosenSm is not None:
+                    entry = BlendShape()
+                    entry.blendShapeName = name
+                    entry.deltas = np.array(chosenSeg, dtype=np.float32)
+                    lodDict.setdefault(
+                        getattr(chosenSm, "subMeshVertexStartIndex", 0), []
+                    ).append(entry)
+                continue
             # Merge this shape's (possibly fragmented) subEntries into one dense delta array spanning
             # the morphable region [baseStart, lastEnd); non-morphed gaps stay zero. Key it under the
             # region's base vertex, which equals the owning submesh's vertexStartIndex, so the submesh
@@ -503,11 +526,6 @@ def _decodeWildsBlendShapes(reMesh):
                 startIdx = getattr(sm, "subMeshVertexStartIndex", 0)
                 full[startIdx - baseStart : startIdx - baseStart + cnt] = deltas[s, vOff : vOff + cnt]
                 vOff += cnt
-            mags = np.abs(full).sum(axis=-1)
-            print(
-                f"[BSIMP] decode '{name}' baseStart={baseStart} span={span} "
-                f"nonzero={int((mags > 1e-5).sum())}/{span} maxAbsSum={float(mags.max()):.5f}"
-            )
             entry = BlendShape()
             entry.blendShapeName = name
             entry.deltas = full
@@ -572,15 +590,15 @@ def _decodeWildsBlendShapes(reMesh):
         for lodIndex, bsData in enumerate(bsh.blendShapeList):
             lodDict = {}
             for ti, bt in enumerate(bsData.blendTargetList):
-                cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict, stride=8)
+                # splitBySubmesh: our export merges ALL submeshes into each target's region (non-morph
+                # ones zero), so assign each shape to the submesh whose slice actually carries deltas --
+                # otherwise every shape lands on the first (body) mesh. No wildsBlendMeta is stored, so a
+                # re-export rebuilds the merged region fresh via the custom path (not the faithful path).
+                cur += decodeTarget(
+                    tail, cur, bt, targetAABB(bsData, ti), lodDict, stride=8, splitBySubmesh=True
+                )
             if lodDict:
                 result[lodIndex] = lodDict
-                bt0 = bsData.blendTargetList[0] if bsData.blendTargetList else None
-                if bt0 is not None:
-                    subs0 = bt0.subMeshEntryList if bt0.subMeshEntryList else [bt0]
-                    baseStart = getattr(subs0[0], "subMeshVertexStartIndex", 0)
-                    reMesh.wildsBlendMeta.setdefault(lodIndex, {})[baseStart] = buildBlockMeta(bsData)
-        print(f"[BSIMP] single-file resident blend: read {sum(len(d) for d in result.values())} target group(s) at buffer base (stride 8)")
     elif streamEntries:
         # Original game meshes: each LOD's targets are packed after a leading index/meshlet table in
         # that LOD's streaming vertex-buffer tail; 16-align the start to skip it (and trailing pad).
@@ -607,11 +625,6 @@ def _decodeWildsBlendShapes(reMesh):
                 cur = se.unkn9 - endOfElements
             else:
                 cur = ((len(tail) - lodTotalDeltaBytes(bsData)) // 16) * 16
-            print(
-                f"[BSIMP] LOD{lodIndex}: unkn9={getattr(se, 'unkn9', 0)} endOfElements={endOfElements} "
-                f"len(tail)={len(tail)} cur={cur} targets={len(bsData.blendTargetList)} "
-                f"totalDeltaBytes={lodTotalDeltaBytes(bsData)} vbufLen={len(se.vertexBuffer) if se.vertexBuffer else 0}"
-            )
             lodDict = {}
             for ti, bt in enumerate(bsData.blendTargetList):
                 cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict)

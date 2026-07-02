@@ -69,8 +69,9 @@ IMPORT_BLEND_SHAPES = False  # Legacy (SF6 and earlier) blend shape import is st
 # Single LOD only. See [[reme-blend-delta-readpath]].
 EXPORT_WILDS_BLEND_SHAPES = True
 
-# Verbose per-export diagnostics ([SFBLEND]/[BSEXP] prints to the system console). Set False to silence.
-DEBUG_STREAMING_BUILD = True
+# Verbose per-export diagnostics ([SFBLEND]/[BSEXP] prints to the system console). Off by default; flip
+# to True only when debugging the single-file blend export.
+DEBUG_STREAMING_BUILD = False
 
 
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
@@ -1738,12 +1739,33 @@ class REMesh:
                 self.streamingInfoHeader = StreamingInfo()
                 self.streamingInfoHeader.read(file)
                 if self.streamingInfoHeader.entryCount != 0 and streamingBuffer is None:
-                    raiseError(
-                        "Streaming mesh file is missing. Both mesh files are required. Extract the corresponding mesh file from inside the streaming directory.\n\nExample Mesh Path: natives\\STM\\Art\\Model\\Character\\ch02\\007\\000\\1\\ch02_007_0001.mesh.241111606\nExample Streaming Mesh Path: natives\\STM\\streaming\\Art\\Model\\Character\\ch02\\007\\000\\1\\ch02_007_0001.mesh.241111606"
+                    # Single-file (resident) mesh -- e.g. this addon's own single-file blend export: the
+                    # streaming buffer lives IN THIS BASE FILE (its streamingInfo bufferStart offsets fall
+                    # inside the file), so no companion is needed. Detect that and use the base file itself
+                    # as the streaming buffer. A real streamed mesh points bufferStart into the companion
+                    # (beyond the base file's end), so it still errors with the "missing companion" message.
+                    savedPos = file.tell()
+                    file.seek(0, 2)
+                    baseSize = file.tell()
+                    file.seek(savedPos)
+                    entries = self.streamingInfoHeader.streamingInfoEntryList
+                    inBase = bool(entries) and all(
+                        e.bufferStart + e.bufferLength <= baseSize for e in entries
                     )
-                    raise Exception(
-                        "Streaming mesh file is missing. Both mesh files are required. Extract the corresponding mesh file from inside the streaming directory."
-                    )
+                    if inBase:
+                        file.seek(0)
+                        streamingBuffer = file.read()
+                        file.seek(savedPos)
+                        print(
+                            "Single-file resident mesh: buffer is in-base, reading without a streaming companion."
+                        )
+                    else:
+                        raiseError(
+                            "Streaming mesh file is missing. Both mesh files are required. Extract the corresponding mesh file from inside the streaming directory.\n\nExample Mesh Path: natives\\STM\\Art\\Model\\Character\\ch02\\007\\000\\1\\ch02_007_0001.mesh.241111606\nExample Streaming Mesh Path: natives\\STM\\streaming\\Art\\Model\\Character\\ch02\\007\\000\\1\\ch02_007_0001.mesh.241111606"
+                        )
+                        raise Exception(
+                            "Streaming mesh file is missing. Both mesh files are required. Extract the corresponding mesh file from inside the streaming directory."
+                        )
         if self.fileHeader.meshOffset:
             file.seek(self.fileHeader.meshOffset)
             self.meshBufferHeader = MeshBufferHeader()
