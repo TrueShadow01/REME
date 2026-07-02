@@ -2403,8 +2403,16 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     regionNormals[s - regionBase : s - regionBase + c] = (
                         np.asarray(nl, dtype=np.float64).reshape(-1, 3)[:c]
                     )
+            # The engine dequantizes EVERY target's deltas in this resident buffer with a SINGLE AABB
+            # (confirmed in-game + by decode: target 1's small-scale deltas came out ~7x/~98x too large
+            # because the engine applied target 0's much larger AABB to them). So all targets in a LOD
+            # must share one box, or the smaller-scale shapes blow up. Use the union of every morph
+            # submesh's deltas; each shape is both packed and stored against this shared AABB.
+            sharedAabb = computeBlendShapeAABB(
+                [bs.deltas for _si, _vc, shs, _sm in blendSubs for bs in shs]
+            )
             for startIdx, vertCount, shapes, sm in blendSubs:
-                aabb = computeBlendShapeAABB([bs.deltas for bs in shapes])
+                aabb = sharedAabb
                 ssIndex = len(blendNames)
                 for bs in shapes:
                     blendNames.append(bs.blendShapeName)
