@@ -1262,8 +1262,9 @@ class BlendShapeData():
 		self.padding2 = read_uint(file)
 		self.dataOffset = read_uint64(file)#[Target count]
 		self.aabbOffset = read_uint64(file)
-		self.blendSOffset = read_uint64(file)
-		self.blendSSOffset = read_uint64(file)
+		if version >= VERSION_SF6:
+			self.blendSOffset = read_uint64(file)
+			self.blendSSOffset = read_uint64(file)
 		file.seek(self.dataOffset)
 		for i in range(0,self.targetCount):
 			blendTargetEntry = BlendTarget()
@@ -1311,14 +1312,21 @@ class BlendShapeHeader():
 		#TODO Blend shapes are different in wilds, fix
 		
 	def read(self,file,version):
-		self.count = read_uint64(file)
-		if version < VERSION_ONI2:
+		if version < VERSION_SF6:
+			self.count = read_ubyte(file)
+			self.hash = int.from_bytes(file.read(7), byteorder="little")
 			self.mainOffset = read_uint64(file)
-			self.zero = read_uint64(file)
+			self.zero = 0
 		else:
+			self.count = read_uint64(file)
+		if version >= VERSION_SF6 and version < VERSION_ONI2:
+			self.mainOffset = read_uint64(file)
+			self.zero = read_uint64(file)
+		elif version >= VERSION_ONI2:
 			self.zero = read_uint64(file)
 			self.mainOffset = read_uint64(file)
-		self.hash = read_uint64(file)
+		if version >= VERSION_SF6:
+			self.hash = read_uint64(file)
 		self.blendShapeOffsetList = []
 		for i in range(0,self.count):
 			self.blendShapeOffsetList.append(read_uint64(file))
@@ -1509,7 +1517,7 @@ class REMesh():
 		self.materialNameRemapList = []
 		self.boneNameRemapList = []
 		self.blendShapeNameRemapList = []
-	def read(self,file,version,lodTarget = None,streamingBuffer = None):#LOD target is an int that determines what lod level to import, the rest get ignored
+	def read(self,file,version,lodTarget = None,streamingBuffer = None, importBlendShapes = IMPORT_BLEND_SHAPES):#LOD target is an int that determines what lod level to import, the rest get ignored
 		self.streamingBuffer = streamingBuffer
 		if streamingBuffer != None:
 			lodTarget = None#Disable lod target optimization since all lods are needed	
@@ -1541,7 +1549,7 @@ class REMesh():
 			self.normalRecalcHeader = NormalRecalc()
 			self.normalRecalcHeader.read(file,sum([i.vertexCount for i in self.lodHeader.lodGroupList[0].meshGroupList]),sum([i.faceCount for i in self.lodHeader.lodGroupList[0].meshGroupList]))
 		"""
-		if self.fileHeader.blendShapesOffset and IMPORT_BLEND_SHAPES:
+		if self.fileHeader.blendShapesOffset and importBlendShapes:
 			file.seek(self.fileHeader.blendShapesOffset)
 			self.blendShapeHeader = BlendShapeHeader()
 			self.blendShapeHeader.read(file,version)
@@ -2417,7 +2425,7 @@ def ParsedREMeshToREMesh(parsedMesh,meshVersion):
 	return reMesh
 #---RE MESH IO FUNCTIONS---#
 
-def readREMesh(filepath,lodTarget = None):
+def readREMesh(filepath,lodTarget = None, importBlendShapes = IMPORT_BLEND_SHAPES):
 	print("Opening " + filepath)
 	try:  
 		file = open(filepath,"rb",buffering=8192)
@@ -2475,7 +2483,7 @@ def readREMesh(filepath,lodTarget = None):
 	else:
 		reMeshFile = REMesh()
 	reMeshFile.meshVersion = meshVersion
-	reMeshFile.read(file,version,lodTarget,streamingBuffer)
+	reMeshFile.read(file,version,lodTarget,streamingBuffer,importBlendShapes)
 	file.close()
 	return reMeshFile
 def writeREMesh(reMeshFile,filepath):

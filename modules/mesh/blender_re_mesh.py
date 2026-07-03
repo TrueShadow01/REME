@@ -675,7 +675,7 @@ def importREMeshFile(filePath,options):
         lodTarget = None
     else:
         lodTarget = 0
-    reMesh = readREMesh(filePath,lodTarget)
+    reMesh = readREMesh(filePath,lodTarget,options["importBlendShapes"])
     meshFileName = os.path.splitext(os.path.split(filePath)[1])[0]
     meshParseStartTime = time.time()
     parsedMesh = ParsedREMesh()

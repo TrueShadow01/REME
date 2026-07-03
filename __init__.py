@@ -650,6 +650,7 @@ class REMeshPreferences(AddonPreferences):
             column2.prop(self, "default_createCollections")
             column2.prop(self, "default_mergeGroups")
             column2.prop(self, "default_importArmatureOnly")
+            column2.prop(self, "default_importBlendShapes")
             column2.prop(self, "default_rotate90")
             column2.prop(self, "default_importBoundingBoxes")
         #Export defaults
@@ -805,8 +806,6 @@ class ImportREMesh(Operator, ImportHelper):
         
         row.enabled = self.mergeArmature == ""
         
-        #layout.prop(self, "importBlendShapes")
-        
         layout.label(text = "Merge With Armature")
         
         
@@ -846,6 +845,7 @@ class ImportREMesh(Operator, ImportHelper):
             column2.prop(self, "createCollections")
             column2.prop(self, "mergeGroups")
             column2.prop(self, "importArmatureOnly")
+            column2.prop(self, "importBlendShapes")
         
             column2.prop(self, "rotate90")
             column2.prop(self, "importBoundingBoxes")

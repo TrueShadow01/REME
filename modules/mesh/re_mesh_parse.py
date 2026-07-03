@@ -109,6 +109,13 @@ def readPackedBitsVec3Array(packedIntArray, numBits):
 		#print(val)
 	return vec3Array
 
+def readPackedBitsVec3Array_11_10_11(packedIntArray):
+	vec3Array = np.zeros(len(packedIntArray),np.dtype("<3f"))
+	vec3Array[:,0] = ((packedIntArray >> 0) & 2047) / 2047
+	vec3Array[:,1] = ((packedIntArray >> 11) & 1023) / 1023
+	vec3Array[:,2] = ((packedIntArray >> 21) & 2047) / 2047
+	return vec3Array
+
 #MPLY
 
 def ReadNorBuffer(norBuffer,tags):
@@ -177,7 +184,7 @@ def ReadBlendShapeByteBuffer(blendShapeBuffer,tags):
 	
 	#blendShapeArray = np.empty((len(blendShapeIntArray),3),dtype = "<f")
 	#bf = CompressedBlendShapeVertexInt()
-	blendShapeArray = readPackedBitsVec3Array(blendShapeIntArray, 10)
+	blendShapeArray = readPackedBitsVec3Array_11_10_11(blendShapeIntArray)
 	#for index, value in enumerate(blendShapeIntArray):
 	#	bf.asUInt32 = value
 	#	blendShapeArray[index] = np.asarray((bf.pos.x,bf.pos.y,bf.pos.z))
@@ -225,7 +232,7 @@ def ReadBlendShapeShortBuffer(blendShapeBuffer,tags):
 	blendShapeArray = np.delete(blendShapeArray, 3, axis=1)#Remove 4th column
 	blendShapeArray = blendShapeArray.astype("float32")
 	
-	blendShapeArray = np.where(blendShapeArray < 0,blendShapeArray / 32768, blendShapeArray / 32767)
+	blendShapeArray /= 65535
 	"""
 	#TODO Do this through numpy
 	for index, entry in enumerate(blendShapeArray):
@@ -235,6 +242,13 @@ def ReadBlendShapeShortBuffer(blendShapeBuffer,tags):
 		#blendShapeFloatArray[index][3] = blendShapeArray[index][3] / (32767 + 1 * (blendShapeArray[index][3] < 0))
 	"""
 	return blendShapeArray
+
+def remapBlendShapeDeltas(blendShapeDeltas,aabb):
+	blendShapeDeltas = blendShapeDeltas.copy()
+	blendShapeDeltas[:,0] = (aabb.max.x - aabb.min.x) * blendShapeDeltas[:,0] + aabb.min.x
+	blendShapeDeltas[:,1] = (aabb.max.y - aabb.min.y) * blendShapeDeltas[:,1] + aabb.min.y
+	blendShapeDeltas[:,2] = (aabb.max.z - aabb.min.z) * blendShapeDeltas[:,2] + aabb.min.z
+	return blendShapeDeltas
 
 BlendShapeBufferReadDict = {
 	"BlendShapeByte":ReadBlendShapeByteBuffer,
@@ -392,10 +406,7 @@ def parseLODStructure(reMesh,targetLODList,vertexDictList,faceBufferList,usedVer
 							
 							blendShapeEntry = BlendShape()
 							blendShapeEntry.blendShapeName = blendShapeName
-							blendShapeEntry.deltas = blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+subMeshEntry.vertCount]
-							blendShapeEntry.deltas[:,0] = blendShapeLODData.aabbList[blendTargetIndex].max.x * blendShapeEntry.deltas[:,0] + blendShapeLODData.aabbList[blendTargetIndex].min.x
-							blendShapeEntry.deltas[:,1] = blendShapeLODData.aabbList[blendTargetIndex].max.y * blendShapeEntry.deltas[:,1] + blendShapeLODData.aabbList[blendTargetIndex].min.y
-							blendShapeEntry.deltas[:,2] = blendShapeLODData.aabbList[blendTargetIndex].max.z * blendShapeEntry.deltas[:,2] + blendShapeLODData.aabbList[blendTargetIndex].min.z
+							blendShapeEntry.deltas = remapBlendShapeDeltas(blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+subMeshEntry.vertCount],blendShapeLODData.aabbList[blendTargetIndex])
 							
 							#blendShapeEntry.deltas[:,0] -= blendShapeLODData.aabbList[blendTargetIndex].max.x
 							#blendShapeEntry.deltas[:,1] -= blendShapeLODData.aabbList[blendTargetIndex].max.y
@@ -412,11 +423,7 @@ def parseLODStructure(reMesh,targetLODList,vertexDictList,faceBufferList,usedVer
 					else:
 						blendShapeEntry = BlendShape()
 						blendShapeEntry.blendShapeName = blendShapeName
-						blendShapeEntry.deltas = blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+blendTarget.vertCount]
-						
-						blendShapeEntry.deltas[:,0] = blendShapeLODData.aabbList[blendTargetIndex].max.x * blendShapeEntry.deltas[:,0] + blendShapeLODData.aabbList[blendTargetIndex].min.x
-						blendShapeEntry.deltas[:,1] = blendShapeLODData.aabbList[blendTargetIndex].max.y * blendShapeEntry.deltas[:,1] + blendShapeLODData.aabbList[blendTargetIndex].min.y
-						blendShapeEntry.deltas[:,2] = blendShapeLODData.aabbList[blendTargetIndex].max.z * blendShapeEntry.deltas[:,2] + blendShapeLODData.aabbList[blendTargetIndex].min.z
+						blendShapeEntry.deltas = remapBlendShapeDeltas(blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+blendTarget.vertCount],blendShapeLODData.aabbList[blendTargetIndex])
 						
 						currentBlendDeltaOffset += blendTarget.vertCount
 						if blendTarget.subMeshVertexStartIndex in blendShapeDict:
