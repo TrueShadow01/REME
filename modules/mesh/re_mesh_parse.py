@@ -430,14 +430,13 @@ class BlendShape:
 
 
 def _decodeWildsBlendShapes(reMesh):
-    # MH Wilds (typing=7) blend shapes. Deltas live in the UNDECLARED TAIL of each streaming
-    # entry's vertexBuffer (after the last declared vertex element), as a dense
-    # [blendShapeNum x vertCount] block of 4-byte 11/10/11-packed values, dequantized via the
-    # per-LOD AABB. Returns {lodIndex: {subMeshVertexStartIndex: [BlendShape, ...]}}.
+    """Decode MH Wilds blend shape deltas into ``{lodIndex: {subMeshVertexStartIndex: [BlendShape, ...]}}``.
+
+    Deltas are dense 11/10/11-packed blocks (streamed 4-byte or resident single-file 8-byte) dequantized
+    via the per-LOD AABB. Also captures each block's layout in ``reMesh.wildsBlendMeta`` for faithful
+    re-export.
+    """
     result = {}
-    # Per-LOD original blend-block layout, captured so the exporter can rebuild the exact structure
-    # the engine expects (target grouping, fragmented subEntries, typing, per-target AABB, blendS).
-    # Keyed {lodIndex: {regionBaseVertex: blockMeta}}; stored on the owning submesh object at import.
     reMesh.wildsBlendMeta = {}
     bsh = reMesh.blendShapeHeader
     mbh = reMesh.meshBufferHeader
@@ -460,9 +459,11 @@ def _decodeWildsBlendShapes(reMesh):
         return subEntries, sum(getattr(sm, "vertCount", 0) for sm in subEntries)
 
     def decodeTarget(tail, cur, bt, aabb, lodDict, stride=4, splitBySubmesh=False):
-        # Decode one blend target's dense block at offset cur; returns its byte length. stride=4 is the
-        # streamed format (one 11/10/11 u32 per vertex); stride=8 is the single-file resident format
-        # (position-delta u32 + an unused normal-delta u32 -- we read the low u32 of each pair).
+        """Decode one blend target's dense block at ``cur`` and return its byte length.
+
+        ``stride`` is 4 (streamed) or 8 (resident; low u32 is the position delta). ``splitBySubmesh``
+        assigns each shape to the subEntry whose slice carries the deltas, for the merged-region format.
+        """
         subEntries, totalVerts = targetVertCount(bt)
         blendShapeNum = bt.blendShapeNum
         deltaBytes = blendShapeNum * totalVerts * stride
@@ -493,9 +494,8 @@ def _decodeWildsBlendShapes(reMesh):
         for s in range(blendShapeNum):
             name = shapeName(ssBase + s)
             if splitBySubmesh:
-                # Assign this shape to the submesh whose slice actually carries deltas (the others are the
-                # zero padding our merged-region export adds), keyed under THAT submesh's start with only
-                # its slice, so it lands on the right Blender mesh instead of all on the first one.
+                # Assign this shape to the subEntry whose slice carries the deltas (the rest is the merged
+                # region's zero padding), keyed under that submesh's start so it lands on the right mesh.
                 vOff = 0
                 chosenSm = None
                 chosenSeg = None
@@ -515,10 +515,8 @@ def _decodeWildsBlendShapes(reMesh):
                         getattr(chosenSm, "subMeshVertexStartIndex", 0), []
                     ).append(entry)
                 continue
-            # Merge this shape's (possibly fragmented) subEntries into one dense delta array spanning
-            # the morphable region [baseStart, lastEnd); non-morphed gaps stay zero. Key it under the
-            # region's base vertex, which equals the owning submesh's vertexStartIndex, so the submesh
-            # picks it up and the applier places delta[i] on submesh-relative vertex i.
+            # Merge this shape's subEntries into one dense array spanning [baseStart, lastEnd) (gaps stay
+            # zero), keyed under the region's base vertex so the owning submesh picks it up.
             full = np.zeros((span, 3), dtype=np.float32)
             vOff = 0
             for sm in subEntries:
@@ -580,20 +578,14 @@ def _decodeWildsBlendShapes(reMesh):
         and mbh.vertexBuffer is not None
     )
     if residentDeltasFirst:
-        # Single-file resident blend (this addon's own export): the deltas live at the vertex-buffer BASE
-        # (offset 0), 8 bytes/vertex (low u32 = position delta), one dense block per (LOD, target) in
-        # order. The geometry was shifted AFTER the deltas (every element's posStartOffset bumped), which
-        # is the >0 first-element offset we detect here -- so ignore any streaming companion and read the
-        # deltas straight from the base buffer.
+        # Single-file resident blend (this addon's export): deltas sit at the vertex-buffer base, 8
+        # bytes/vertex, one dense block per (LOD, target). The geometry was shifted after them, which is
+        # the >0 first-element offset detected above, so read the deltas straight from the base buffer.
         tail = mbh.vertexBuffer
         cur = 0
         for lodIndex, bsData in enumerate(bsh.blendShapeList):
             lodDict = {}
             for ti, bt in enumerate(bsData.blendTargetList):
-                # splitBySubmesh: our export merges ALL submeshes into each target's region (non-morph
-                # ones zero), so assign each shape to the submesh whose slice actually carries deltas --
-                # otherwise every shape lands on the first (body) mesh. No wildsBlendMeta is stored, so a
-                # re-export rebuilds the merged region fresh via the custom path (not the faithful path).
                 cur += decodeTarget(
                     tail, cur, bt, targetAABB(bsData, ti), lodDict, stride=8, splitBySubmesh=True
                 )

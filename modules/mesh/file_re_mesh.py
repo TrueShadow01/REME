@@ -55,23 +55,10 @@ from .file_re_mesh_mply import REMeshMPLY
 
 IMPORT_BLEND_SHAPES = False  # Legacy (SF6 and earlier) blend shape import is still broken; keep disabled.
 
-# MH Wilds single-file blend shape EXPORT. Writes a self-contained base .mesh (no streaming companion)
-# whose blend block + per-shape deltas live in the resident (vbi=0) buffer. CONFIRMED working in-game:
-# custom shape keys authored from scratch deform correctly. The mechanics (in buildWildsBlendShapeExport
-# and buildWildsSingleFileBlend):
-#   * EVERY submesh in the LOD is a blend target sub-entry -- non-morph submeshes get zero deltas, else the
-#     engine drops them from the blend pipeline and flings them off (the body flew into the sky).
-#   * the resident delta resource is read from the buffer BASE (offset 0), so the deltas go FIRST and the
-#     geometry is shifted after them (every vertex-element offset bumped by the delta region size).
-#   * the resident delta stride is 8 bytes/vertex: the 11/10/11 position delta in the low u32 and a zero
-#     normal-delta slot in the high u32 (the streamed format is 4 bytes; using it read at v*8 garbled).
-#   * the per-LOD target list is padded to targetCount+typing slots (the engine iterates that many).
-# Single LOD only. See [[reme-blend-delta-readpath]].
+# MH Wilds single-file blend shape export: writes a self-contained base .mesh (single LOD) whose blend
+# block and per-shape deltas live in the resident (vbi=0) vertex buffer, with no streaming companion.
+# See buildWildsBlendShapeExport / buildWildsSingleFileBlend and docs/wilds_single_file_shape_keys.md.
 EXPORT_WILDS_BLEND_SHAPES = True
-
-# Verbose per-export diagnostics ([SFBLEND]/[BSEXP] prints to the system console). Off by default; flip
-# to True only when debugging the single-file blend export.
-DEBUG_STREAMING_BUILD = False
 
 
 # MH Wilds-era meshes (by raw file version) use a different, working blend shape decode and are
@@ -1681,7 +1668,7 @@ class REMesh:
         self.normalRecalcRegionBytes = b""  # MH Wilds: pre-serialized 16-byte normal-recalc header
         self.streamingBytes = b""  # MH Wilds: bytes for the parallel streaming companion file
         self.isStreamed = False  # MH Wilds: True when the mesh region is written as the streamed layout
-        self.streamInBase = False  # MH Wilds: True = append streamingBytes to the base file (single-file experiment)
+        self.streamInBase = False  # MH Wilds: True = append streamingBytes to the base file
         self.meshRegionBytes = b""  # MH Wilds: pre-serialized mesh region (streamed layout)
 
     def read(
@@ -1739,11 +1726,9 @@ class REMesh:
                 self.streamingInfoHeader = StreamingInfo()
                 self.streamingInfoHeader.read(file)
                 if self.streamingInfoHeader.entryCount != 0 and streamingBuffer is None:
-                    # Single-file (resident) mesh -- e.g. this addon's own single-file blend export: the
-                    # streaming buffer lives IN THIS BASE FILE (its streamingInfo bufferStart offsets fall
-                    # inside the file), so no companion is needed. Detect that and use the base file itself
-                    # as the streaming buffer. A real streamed mesh points bufferStart into the companion
-                    # (beyond the base file's end), so it still errors with the "missing companion" message.
+                    # Single-file (resident) mesh: if every streamingInfo buffer falls inside this base
+                    # file, use the base file itself as the streaming buffer (no companion needed). A real
+                    # streamed mesh points beyond the file end and still errors as before.
                     savedPos = file.tell()
                     file.seek(0, 2)
                     baseSize = file.tell()
@@ -1917,8 +1902,7 @@ class REMesh:
                 # MH Wilds streamed layout: the whole mesh region was pre-serialized.
                 file.write(self.meshRegionBytes)
                 if self.streamInBase and self.streamingBytes:
-                    # Single-file resident-blend experiment: the streamed buffer lives in the base, 16-aligned
-                    # right after the mesh region (matches baseStreamOffset / the rebased bufferStarts).
+                    # Streamed buffer kept in-base, 16-aligned right after the mesh region.
                     file.write(b"\x00" * getPaddingAmount(file.tell(), 16))
                     file.write(self.streamingBytes)
             else:
@@ -2233,8 +2217,10 @@ def WriteToColorBuffer(bufferStream, colorList):
 
 
 def computeBlendShapeAABB(deltaArrayList):
-    # Symmetric (min = -max) AABB covering the per-axis extent of all the given delta arrays.
-    # This is the box the Wilds 11/10/11 packing quantizes against (one per blend target).
+    """Return the symmetric (min = -max) AABB covering the per-axis extent of the given delta arrays.
+
+    This is the box the 11/10/11 delta packing quantizes against.
+    """
     aabb = AABB()
     if not deltaArrayList:
         return aabb
@@ -2243,7 +2229,6 @@ def computeBlendShapeAABB(deltaArrayList):
     )
     if len(allDeltas) == 0:
         return aabb
-    # Keep the range non-zero so the quantization step never divides by zero.
     maxAbs = np.maximum(np.max(np.abs(allDeltas), axis=0), 1e-6)
     aabb.min.x, aabb.min.y, aabb.min.z = (-maxAbs[0], -maxAbs[1], -maxAbs[2])
     aabb.max.x, aabb.max.y, aabb.max.z = (maxAbs[0], maxAbs[1], maxAbs[2])
@@ -2251,8 +2236,10 @@ def computeBlendShapeAABB(deltaArrayList):
 
 
 def packBlendShapeDeltas(deltaArray, aabb):
-    # Inverse of the Wilds blend shape decode: dequant is delta = aabb.min + n*(aabb.max-aabb.min),
-    # so n = (delta - aabb.min) / (aabb.max - aabb.min); pack as 11/10/11 (x=11, y=10, z=11 bits).
+    """Pack per-vertex deltas as 11/10/11 (x=11, y=10, z=11) codes normalized against ``aabb``.
+
+    Inverse of the decode ``delta = aabb.min + n * (aabb.max - aabb.min)``.
+    """
     deltas = np.asarray(deltaArray, dtype=np.float64).reshape(-1, 3)
     rangeVec = np.array(
         [aabb.max.x - aabb.min.x, aabb.max.y - aabb.min.y, aabb.max.z - aabb.min.z]
@@ -2267,20 +2254,17 @@ def packBlendShapeDeltas(deltaArray, aabb):
 
 
 def packBlendShapeDeltasStride8(deltaArray, aabb, normals=None):
-    # The resident single-file blend path reads 8 bytes per vertex: the 11/10/11 position delta in the low
-    # u32 and an ABSOLUTE 11/10/11 normal in the high u32. The engine blends base->slot by the shape
-    # weight, so a midpoint (zero) slot collapses the normal to (0,0,0) and the mesh darkens as the shape
-    # drives. Pass the per-vertex base (or deformed) normal (unit vector, encoded over [-1,1]) to keep
-    # shading correct. normals=None falls back to the midpoint. Returns [pos0, nrm0, pos1, nrm1, ...].
+    """Pack the resident 8-bytes-per-vertex blend format: 11/10/11 position delta in the low u32 and an
+    absolute per-vertex normal in the high u32, interleaved as ``[pos0, nrm0, pos1, nrm1, ...]``.
+
+    The normal uses the geometry's int8 format (``floor(n*127)`` packed ``[nx][ny][nz][0]``); ``normals``
+    unit vectors keep shading correct, and ``None`` falls back to a midpoint slot.
+    """
     posPacked = packBlendShapeDeltas(deltaArray, aabb)
     if normals is None:
-        nrmPacked = np.full(len(posPacked), 0x80100400, dtype="<u4")  # midpoint (unshaded fallback)
+        nrmPacked = np.full(len(posPacked), 0x80100400, dtype="<u4")
     else:
         nrm = np.clip(np.asarray(normals, dtype=np.float64).reshape(-1, 3), -1.0, 1.0)
-        # Encode the normal in the SAME format the geometry's norTan buffer uses: three signed int8
-        # components = floor(n*127), packed [nx][ny][nz][0] into the u32. The game provably reads geometry
-        # normals this way; the 11/10/11 layout (used for the position delta) produced scattered dark
-        # specular, so the slot is almost certainly a standard int8 vertex normal.
         ni = np.clip(np.floor(nrm * 127.0).astype(np.int32), -127, 127)
         b0 = (ni[:, 0] & 0xFF).astype(np.uint32)
         b1 = (ni[:, 1] & 0xFF).astype(np.uint32)
@@ -2293,13 +2277,15 @@ def packBlendShapeDeltasStride8(deltaArray, aabb, normals=None):
 
 
 def computeVertexNormals(positions, faceList):
-    # Area-weighted per-vertex normals from positions + triangles (submesh-local indices). Used to measure
-    # the normal change a shape's deltas induce (recompute(base) vs recompute(base+delta)); that change is
-    # added to the smooth base normal so the resident normal slot follows the deformed surface.
+    """Return unit area-weighted per-vertex normals from positions and submesh-local triangles.
+
+    Used to derive each shape's deformed normal by differencing ``recompute(base)`` against
+    ``recompute(base + delta)``.
+    """
     P = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
     faces = np.asarray(faceList, dtype=np.int64).reshape(-1, 3)
     normals = np.zeros_like(P)
-    fn = np.cross(P[faces[:, 1]] - P[faces[:, 0]], P[faces[:, 2]] - P[faces[:, 0]])  # area-weighted
+    fn = np.cross(P[faces[:, 1]] - P[faces[:, 0]], P[faces[:, 2]] - P[faces[:, 0]])
     np.add.at(normals, faces[:, 0], fn)
     np.add.at(normals, faces[:, 1], fn)
     np.add.at(normals, faces[:, 2], fn)
@@ -2309,23 +2295,21 @@ def computeVertexNormals(positions, faceList):
 
 
 def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
-    # Gather Blender-side blend shapes into per-LOD blend targets. Each submesh that has shape keys
-    # becomes its own blend target (its own blendShapeNum / AABB / name range), so submeshes with
-    # different shape key sets are handled. Returns (deltaBytes, perLodList, blendNames) where
-    # blendNames is the flat per-occurrence name list (target.blendSSIndex offsets into it), or
-    # (None, None, None) if there are no shape keys anywhere. perLodList has one entry per main LOD
-    # (possibly with an empty target list) so the BlendShapeData list stays index-aligned with LODs.
+    """Gather Blender shape keys into per-LOD blend targets, one target per morph submesh.
+
+    Each target covers a merged region spanning every submesh in the LOD (non-morph submeshes get zero
+    deltas), all sharing one AABB. Returns ``(deltaBytes, perLodList, blendNames)``, or ``(None, None,
+    None)`` when there are no shape keys.
+    """
     if not EXPORT_WILDS_BLEND_SHAPES:
-        # Disabled until the streaming-file write path exists (see the flag's definition).
         return None, None, None
     perLodList = []
     deltaChunks = []
     blendNames = []
     anyBlend = False
     for lod in parsedMesh.mainMeshLODList:
-        # Collect every submesh in this LOD that has shape keys (keep the submesh for its blend meta).
-        blendSubs = []  # (startIdx, vertCount, shapes, sm) -- submeshes that carry shape keys
-        allSubs = []    # (startIdx, vertCount) -- EVERY submesh in the LOD, for the merged blend region
+        blendSubs = []  # (startIdx, vertCount, shapes, sm): submeshes that carry shape keys
+        allSubs = []    # (startIdx, vertCount, sm): every submesh in the LOD, for the merged region
         for viscon in lod.visconGroupList:
             for sm in viscon.subMeshList:
                 subData = parsedSubMeshToSubMeshDataDict.get(sm)
@@ -2341,10 +2325,9 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
         blockBlendS = None
         metaSubs = [bs for bs in blendSubs if getattr(bs[3], "wildsBlendMeta", None)]
         if metaSubs:
-            # FAITHFUL PATH: rebuild the original block layout exactly from the metadata captured at
-            # import (target grouping, fragmented subEntries with their cumulative vertOffsets, typing,
-            # per-target AABB, blendS). Each shape's deltas are pulled from its shape key by name and
-            # sliced into the recorded sub-ranges, so the delta buffer matches the original byte layout.
+            # Faithful re-export path: rebuild the original block layout from the metadata captured at
+            # import (target grouping, subEntries, typing, per-target AABB, blendS), slicing each shape
+            # key's deltas into the recorded sub-ranges so the buffer matches the original bytes.
             for startIdx, vertCount, shapes, sm in metaSubs:
                 meta = sm.wildsBlendMeta
                 blockTyping = meta.get("typing")
@@ -2382,20 +2365,15 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
             perLodList.append({"targets": targets, "typing": blockTyping, "blendS": blockBlendS})
             continue
         if blendSubs:
-            # The engine processes EVERY submesh through the blend pipeline once the mesh has a blend
-            # block; a submesh left OUT of the target's subEntries gets no blend-group entry and renders
-            # as garbage (this is why the non-morph body submesh flew off into the sky). So the merged
-            # region spans ALL submeshes in vertex order, and non-morph submeshes contribute zero deltas
-            # (no movement, with the symmetric AABB). Each morph submesh becomes a target covering the
-            # whole region, its real deltas landing in its own portion (offset = its start - region base).
+            # The engine runs every submesh through the blend pipeline, so the merged region spans all
+            # submeshes in vertex order with non-morph submeshes contributing zero deltas; each morph
+            # submesh is a target covering the whole region (its deltas land at start - regionBase).
             allSubs.sort(key=lambda sc: sc[0])
             regionBase = allSubs[0][0]
             mergedRegion = [(s, c) for (s, c, _sm) in allSubs]
             totalRegionVerts = sum(c for (_s, c, _sm) in allSubs)
-            # Base per-vertex normals across the WHOLE region (same for every shape). The resident delta's
-            # high u32 is an ABSOLUTE normal the engine blends base->slot by weight, so it must carry a real
-            # normal or the mesh darkens when the shape is driven. (Deformed-per-shape normals are a later
-            # refinement; base normals are correct for small deforms.)
+            # Base per-vertex normals across the whole region; the delta's high u32 is an absolute normal
+            # the engine blends base->slot by weight, so it must carry a real normal or the surface darkens.
             regionNormals = np.zeros((totalRegionVerts, 3), dtype=np.float64)
             for s, c, subm in allSubs:
                 nl = getattr(subm, "normalList", None)
@@ -2403,11 +2381,9 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     regionNormals[s - regionBase : s - regionBase + c] = (
                         np.asarray(nl, dtype=np.float64).reshape(-1, 3)[:c]
                     )
-            # The engine dequantizes EVERY target's deltas in this resident buffer with a SINGLE AABB
-            # (confirmed in-game + by decode: target 1's small-scale deltas came out ~7x/~98x too large
-            # because the engine applied target 0's much larger AABB to them). So all targets in a LOD
-            # must share one box, or the smaller-scale shapes blow up. Use the union of every morph
-            # submesh's deltas; each shape is both packed and stored against this shared AABB.
+            # The engine dequantizes every target in this resident buffer with a single AABB, so all
+            # targets share one box (the union of every morph submesh's deltas); otherwise a smaller-scale
+            # shape blows up when a larger target's box is applied to it.
             sharedAabb = computeBlendShapeAABB(
                 [bs.deltas for _si, _vc, shs, _sm in blendSubs for bs in shs]
             )
@@ -2417,22 +2393,17 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                 for bs in shapes:
                     blendNames.append(bs.blendShapeName)
                 portionOffset = startIdx - regionBase
-                # For the deformed-normal slot: my own area-weighted recompute of the base surface, to
-                # difference against the deformed one (keeps the smooth base normal + the deformation's
-                # orientation change). faceList indices are submesh-local.
+                # Recompute the base surface's area-weighted normals (submesh-local faces) to difference
+                # against the deformed surface for each shape's normal slot.
                 basePos = np.asarray(sm.vertexPosList, dtype=np.float64).reshape(-1, 3)
                 faceList = getattr(sm, "faceList", None)
                 baseNflat = None
                 if faceList is not None and len(faceList):
                     try:
-                        # faceList indices must be submesh-local (0..vertCount-1) for this recompute.
                         if int(np.asarray(faceList).max()) < len(basePos):
                             baseNflat = computeVertexNormals(basePos, faceList)
-                        elif DEBUG_STREAMING_BUILD:
-                            print("[BSEXP] faceList not submesh-local; deformed normal skipped (base normals used)")
-                    except Exception as e:
-                        if DEBUG_STREAMING_BUILD:
-                            print(f"[BSEXP] deformed-normal recompute failed ({e}); base normals used")
+                    except Exception:
+                        baseNflat = None
                 shapeArrays = []
                 for bs in shapes:
                     full = np.zeros((totalRegionVerts, 3), dtype=np.float64)
@@ -2440,7 +2411,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                     full[portionOffset : portionOffset + vertCount] = real
                     shapeNormals = regionNormals
                     if baseNflat is not None:
-                        # deformed normal = smooth base normal + (recompute(base+delta) - recompute(base))
+                        # slot normal = base normal + (recompute(base+delta) - recompute(base))
                         defNflat = computeVertexNormals(basePos + real, faceList)
                         slotN = regionNormals[portionOffset : portionOffset + vertCount] + (defNflat - baseNflat)
                         ln = np.linalg.norm(slotN, axis=1, keepdims=True)
@@ -2449,12 +2420,6 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                         shapeNormals[portionOffset : portionOffset + vertCount] = slotN / ln
                     shapeArrays.append(packBlendShapeDeltasStride8(full, aabb, shapeNormals))
                 chunk = np.concatenate(shapeArrays).astype("<u4").tobytes()
-                if DEBUG_STREAMING_BUILD:
-                    print(
-                        f"[BSEXP] target shapes={len(shapes)} regionVerts={totalRegionVerts} "
-                        f"portionOffset={portionOffset} portionVerts={vertCount} chunkBytes={len(chunk)} "
-                        f"subEntries={len(mergedRegion)} names={[bs.blendShapeName for bs in shapes]}"
-                    )
                 deltaChunks.append(chunk)
                 targets.append(
                     {
@@ -2471,14 +2436,14 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
 
 
 def serializeWildsBlendShapeRegion(perLodList, baseOffset):
-    # Serialize BlendShapeHeader + per-LOD BlendShapeData (+ BlendTarget/BlendSubMesh/AABB/blendS/
-    # blendSSList sub-blocks) into one contiguous byte block at absolute file offset baseOffset,
-    # computing every internal absolute offset. Mirrors the import struct layout, with one or more
-    # blend targets per LOD. The importer reads blendS/blendSSList immediately after the AABB list,
-    # so those must be contiguous with it.
+    """Serialize the blend block (header + per-LOD BlendShapeData with its target/subEntry/AABB/blendS/
+    blendSSList sub-blocks) into one contiguous byte block at absolute file offset ``baseOffset``.
+
+    Every internal pointer is written as an absolute file offset, matching the import struct layout.
+    """
     def subsOf(t):
-        # Normalize to (startIdx, vertOffset|None, vertCount). subEntries3 carries the original's exact
-        # cumulative vertOffsets; plain subEntries (custom path) leaves vertOffset None to be computed.
+        # Normalize to (startIdx, vertOffset|None, vertCount); subEntries3 keeps the original's exact
+        # cumulative vertOffsets, plain subEntries leaves vertOffset None to be computed here.
         if "subEntries3" in t:
             return [tuple(se) for se in t["subEntries3"]]
         return [(s, None, c) for (s, c) in t["subEntries"]]
@@ -2490,14 +2455,9 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
     for lod in perLodList:
         targets = lod["targets"]
         nTargets = len(targets)
-        # The engine iterates (targetCount + typing) target records (decompiled load loop:
-        # `while uVar11 != puVar4[0] + puVar4[1]`, where puVar4 = the per-LOD BlendShapeData and
-        # [+0]=targetCount, [+2]=typing). Vanilla physically allocates that many target slots: the real
-        # targets first, then `typing` PADDING slots (verified vs ch03_090_0012: 5 real + 3 pad = 8, the
-        # pad slots having flag(+7)=0, shapeNum=0). Writing only nTargets slots makes the engine walk past
-        # our data into garbage and AV on the bogus subEntry pointer (crash at +0xAB1188C). So reserve the
-        # full padded count; the pad slots stay zeroed (flag=0, subMeshEntryCount=0) so the inner
-        # sub-entry loop is skipped and nothing is dereferenced.
+        # The engine iterates (targetCount + typing) target records, so the list is reserved for that many
+        # slots: real targets first, then `typing` zeroed padding slots (flag/subEntryCount 0) that the
+        # inner loop skips. A shorter list makes the engine walk into garbage and crash.
         typingVal = lod.get("typing") or (3 if nTargets > 1 else 7)
         paddedTargetCount = nTargets + typingVal
         dataStructOff = cur
@@ -2529,13 +2489,8 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
     buf = bytearray(cur)
     struct.pack_into("<Q", buf, 0, count)
     struct.pack_into("<Q", buf, 8, 0)  # zero
-    # mainOffset: the engine's load-time relocation reads this field (blendShapes+0x10) and uses it as the
-    # pointer to the per-block offset array (blendShapeOffsetList), which sits right after the 32-byte
-    # header. It MUST point at baseOffset+0x20 (matches vanilla = baseOffset+32). Pointing it at
-    # baseOffset+headerSize (the first data block) makes the engine read the block's targetCount/typing
-    # bytes as block-offset pointers -> rebases garbage -> deref -> access violation on hover. The import
-    # decoder ignores this field (reads the list at +0x20 directly), which hid the bug. (Found via the
-    # MonsterHunterWilds.exe+0xA9A7BCC crash disasm: the mesh is a self-relocating blob, base+offset.)
+    # mainOffset must point at the blendShapeOffsetList right after the 32-byte header (baseOffset+32);
+    # the engine relocates this at load time, and any other value makes it deref garbage and crash.
     struct.pack_into("<Q", buf, 16, baseOffset + 32)  # mainOffset -> blendShapeOffsetList
     struct.pack_into("<Q", buf, 24, 0)  # hash
     for i, lay in enumerate(layout):
@@ -2544,18 +2499,11 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
         targets = lod["targets"]
         nTargets = len(targets)
         d = lay["dataStructOff"]
-        # unknFlag = (total blend shapes in this block << 16) | first target's blendSSIndex.
-        # Verified against the original face: e.g. (41<<16)|41 = 2687017. The engine uses this to
-        # size/index the block's blend shapes; writing 0 here is what crashed the GPU at load.
+        # unknFlag = (total blend shapes in this block << 16) | first target's blendSSIndex; the engine
+        # uses it to size/index the block's shapes.
         totalShapes = sum(t["blendShapeNum"] for t in targets)
         firstSSIndex = targets[0]["blendSSIndex"] if targets else 0
-        # typing: the engine reads only the first target unless this signals multi-target. Originals:
-        # single-target face = 7, multi-target corrective armor (ch03_090_0012) = 3. With 7 on a
-        # multi-target block the runtime allocated channels for target[0] only (12 of 13). Use 3 when
-        # there's more than one target so every target's shapes get channels.
         struct.pack_into("<H", buf, d + 0, nTargets)  # targetCount
-        # typing = padding-slot count (already chosen in the layout pass and the target list reserved for
-        # nTargets+typing entries; the trailing `typing` slots are left zeroed = flag0/subEntryCount0).
         typingVal = lay["typingVal"]
         struct.pack_into("<H", buf, d + 2, typingVal)  # typing
         struct.pack_into("<I", buf, d + 4, (totalShapes << 16) | (firstSSIndex & 0xFFFF))  # unknFlag
@@ -2579,8 +2527,7 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
             for j, (startIdx, vertOffset, vertCount) in enumerate(subs):
                 o = sOff + j * 16
                 struct.pack_into("<I", buf, o + 0, startIdx)  # subMeshVertexStartIndex
-                # Use the recorded vertOffset (cumulative across the block in the original) when present;
-                # otherwise compute it per-target for the simplified/custom path.
+                # Use the recorded cumulative vertOffset when present, else compute it per-target.
                 struct.pack_into("<I", buf, o + 4, cumOff if vertOffset is None else vertOffset)
                 struct.pack_into("<I", buf, o + 8, vertCount)
                 struct.pack_into("<I", buf, o + 12, 0)  # paramUnkn3
@@ -2589,10 +2536,8 @@ def serializeWildsBlendShapeRegion(perLodList, baseOffset):
             ao = lay["aabbOff"] + ti * 32
             struct.pack_into("<4f", buf, ao + 0, aabb.min.x, aabb.min.y, aabb.min.z, 0.0)
             struct.pack_into("<4f", buf, ao + 16, aabb.max.x, aabb.max.y, aabb.max.z, 0.0)
-        # blendSSList holds one int per shape, running continuously 0..(totalShapes-1) across ALL
-        # targets in the block (verified against the original ch03_090_0012: 5 targets of 1,1,1,1,8
-        # shapes give [0..11], not a per-target restart). The face's single target made both readings
-        # identical; the multi-target armor disambiguates. blendS (3 ints) stays zero (face uses that).
+        # blendSSList holds one int per shape, running continuously 0..(totalShapes-1) across all targets
+        # in the block (not a per-target restart); blendS is 3 ints, normally zero.
         blendSVals = (lod.get("blendS") or [0, 0, 0])[:3]
         for k, v in enumerate(blendSVals):
             struct.pack_into("<i", buf, lay["blendSOff"] + k * 4, int(v))
@@ -2666,14 +2611,12 @@ class sizeData:
 
 
 def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None):
-    # Single-file (resident) MH Wilds blend. Lays the blend submesh's geometry + normal-recalc + deltas
-    # into the RESIDENT buffer (the 80-byte mesh header's buffer, read via vbi=0 from the base) and
-    # describes it with ONE streaming-buffer-header entry (vbi=0, word7=geomEnd, word8=nrVertStart,
-    # word9=deltaStart) plus streamingInfo entryCount=1 pointing at the resident buffer in-base. This
-    # in-base buffer descriptor is mandatory: without it the engine has no blend buffer to bind and AVs
-    # (reads -1) on an armor with no vanilla blend streaming companion. Single LOD only (Export All LODs
-    # OFF). Known limitation: the vbi=0 resident path still aliases shapes 1..N-1 per-shape (the open
-    # problem); this build makes the file self-sufficient so it loads instead of crashing.
+    """Rebuild the mesh region so the blend deltas ship in the resident (vbi=0) vertex buffer in-base.
+
+    Lays [deltas][geometry] in one buffer described by a single streaming-buffer-header entry plus a
+    streamingInfo pointing at it in-base, so the file loads and drives with no streaming companion.
+    Returns False if the mesh has no usable buffer. Single LOD only.
+    """
     mbh = reMesh.meshBufferHeader
     if mbh is None or reMesh.lodHeader is None or not mbh.vertexElementList:
         return False
@@ -2685,56 +2628,34 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     lodGroups = reMesh.lodHeader.lodGroupList
     if not lodGroups:
         return False
-    if len(lodGroups) > 1 and DEBUG_STREAMING_BUILD:
-        print(f"[SFBLEND] WARNING: {len(lodGroups)} LODs present; single-file blend uses LOD0 only. Export with 'Export All LODs' OFF.")
+    if len(lodGroups) > 1:
+        print(f"WARNING: {len(lodGroups)} LODs present; single-file blend uses LOD0 only. Export with 'Export All LODs' off.")
     lodGroup = lodGroups[0]
     if not lodGroup.meshGroupList or not lodGroup.meshGroupList[0].vertexInfoList:
         return False
 
-    # Use the MINIMUM vertex/face start across ALL submeshes, not meshGroupList[0]'s. The morph submesh
-    # can be listed first in the LOD while its vertices/faces sit AFTER the body's in the buffer; keying
-    # off group[0] then slices from the wrong base, so the body (lower indices) falls outside the copied
-    # range and renders as exploded garbage flying off, while the morph submesh -- sitting at the slice
-    # start -- still looks correct. min() handles any submesh ordering. vCount/fCount stay as the summed
-    # group counts (geometry is contiguous, so [min, min+count] spans the whole LOD).
+    # Use the minimum vertex/face start across all submeshes (a morph submesh may be listed first while
+    # its vertices sit after the body's, so keying off group[0] would slice from the wrong base).
     allSubs = [sub for mg in lodGroup.meshGroupList for sub in mg.vertexInfoList]
     vStart = min(s.vertexStartIndex for s in allSubs)
     fStart = min(s.faceStartIndex for s in allSubs)
     vCount = sum(mg.vertexCount for mg in lodGroup.meshGroupList)
     fCount = sum(mg.faceCount for mg in lodGroup.meshGroupList)
-    if DEBUG_STREAMING_BUILD:
-        print(f"[SFBLEND] LOD0 groups={len(lodGroup.meshGroupList)} subs={len(allSubs)} "
-              f"vStart(min)={vStart} vCount={vCount} fStart(min)={fStart} fCount={fCount}")
-        for gi, mg in enumerate(lodGroup.meshGroupList):
-            for sub in mg.vertexInfoList:
-                print(f"[SFBLEND]   group{gi} sub vtxStart={sub.vertexStartIndex} "
-                      f"faceStart={sub.faceStartIndex} vbi={sub.vertexBufferIndex}")
-        print(f"[SFBLEND] vertexBuffer={len(inlineVtx)} faceBuffer={len(inlineFace)} "
-              f"mainVEC={mainVEC} elements:")
-        for j, ve in enumerate(elements):
-            print(f"[SFBLEND]   elem{j} typing={ve.typing} stride={ve.stride} posStartOffset={ve.posStartOffset}")
 
-    # Use the geometry buffer VERBATIM. It already renders correctly through the normal export path; the
-    # previous element-by-element re-slice (which recomputed each element's offset) misplaced the Wilds
-    # extended-weight stream -> the body submesh (which uses it) exploded while the morph submesh (which
-    # doesn't) looked fine. Keep mbh.vertexBuffer/faceBuffer byte-for-byte and reuse each element's
-    # ORIGINAL posStartOffset; only the blend deltas get appended and a streaming descriptor wrapped
-    # around it. Single-LOD only, so the whole buffer is LOD0 and the submeshes' existing indices stay
-    # valid (no rebase needed).
+    # Keep the geometry buffer verbatim (byte-for-byte, original posStartOffsets) so the extended-weight
+    # stream stays in place; only the deltas are added and a streaming descriptor wrapped around it.
     geom = inlineVtx
     faces = inlineFace
-    deltas = blendDeltaBytes or b""  # single LOD: all the delta bytes belong here
+    deltas = blendDeltaBytes or b""
 
     geomPadded = getPaddedPos(len(geom), 16)
     deltaRegion = bytearray(deltas)
     deltaRegion += b"\x00" * (-len(deltaRegion) % 16)
     deltaPad = len(deltaRegion)
     if deltas:
-        # The engine reads the resident delta resource from the buffer BASE (offset 0) -- it ignores
-        # word9 -- so geometry-at-0 (position floats) would be misread as packed deltas -> garbage +-Z on
-        # every vertex. Put the deltas at offset 0 and shift the geometry after them; bump every
-        # vertex-element offset by the delta region size so geometry still reads correctly via the
-        # standard header (vertexBufferOffset + posStartOffset).
+        # The engine reads the resident delta resource from the buffer base (offset 0), so the deltas go
+        # first and the geometry is shifted after them; every vertex-element offset is bumped by the delta
+        # region size so geometry still reads via vertexBufferOffset + posStartOffset.
         elemShift = deltaPad
         deltaStart = 0
         nrVertStart = 0
@@ -2814,8 +2735,8 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     sp("<I", buf, siStructOff + 0, entryCount)
     sp("<I", buf, siStructOff + 4, 0)
     sp("<Q", buf, siStructOff + 8, M + siEntriesOff)
-    # base + per-entry vertex element declarations -- reuse each element's ORIGINAL offset into the
-    # (verbatim) geometry buffer so the engine reads geometry exactly as the working normal export does.
+    # base + per-entry vertex element declarations; reuse each element's original offset (shifted by the
+    # delta region) into the verbatim geometry buffer.
     for tableOff in (baseElemOff, streamVEOff):
         for j, ve in enumerate(elements):
             eo = tableOff + j * 8
@@ -2830,17 +2751,10 @@ def buildWildsSingleFileBlend(reMesh, blendDeltaBytes=b"", blendPerLodList=None)
     reMesh.isStreamed = True
     reMesh.streamInBase = False  # all data is inside the mesh region; no separate companion append
     reMesh.streamingBytes = b""
-    # submeshes read from the resident buffer (vbi=0). The buffer is kept verbatim (full LOD0), so the
-    # existing vertex/face start indices remain valid -- only the buffer index changes.
+    # Point every submesh at the resident buffer (vbi=0); the verbatim buffer keeps their start indices valid.
     for mg in lodGroup.meshGroupList:
         for sub in mg.vertexInfoList:
             sub.vertexBufferIndex = 0
-    if DEBUG_STREAMING_BUILD:
-        print(
-            f"[SFBLEND] resident vbi=0: geom={len(geom)} (no normal-recalc) "
-            f"deltas={len(deltas)} vbl={vbl} faces={baseFaceSize} word8nrVert={nrVertStart} "
-            f"word9deltaStart={deltaStart} streamingInfoEntries={entryCount} fileSize={reMesh.fileHeader.fileSize}"
-        )
     return True
 
 
@@ -3447,9 +3361,8 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
     faceBuffer.close()
     secondaryWeightBuffer.close()
 
-    # MH Wilds single-file blend: rebuild the mesh region as the resident blend layout -- deltas at the
-    # buffer base (the engine reads the resident delta resource from offset 0), geometry shifted after,
-    # 8 bytes/vertex deltas, wrapped in the in-base streaming descriptor. CONFIRMED working in-game.
+    # MH Wilds single-file blend: rebuild the mesh region as the resident blend layout when shape keys
+    # were exported.
     if version == VERSION_MHWILDS and blendPerLodList is not None:
         buildWildsSingleFileBlend(reMesh, blendDeltaBytes, blendPerLodList)
 
@@ -3553,8 +3466,8 @@ def writeREMesh(reMeshFile, filepath):
     reMeshFile.write(file, version)
     file.close()
 
-    # MH Wilds: write the parallel streaming companion file when there is streamed data — UNLESS the
-    # resident-blend single-file experiment embedded it in the base file already.
+    # MH Wilds: write the parallel streaming companion file when there is streamed data, unless it was
+    # already embedded in the base file (single-file resident blend).
     streamingBytes = getattr(reMeshFile, "streamingBytes", b"")
     if streamingBytes and not getattr(reMeshFile, "streamInBase", False):
         paths = splitNativesPath(filepath)
