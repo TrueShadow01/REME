@@ -1362,20 +1362,11 @@ def newATOSNode (nodeTree,textureType,matInfo):
 			nodeTree.links.new(alphaUV2Node.outputs["Value"],mixUVAlphaNode.inputs["Fac"])
 			currentPos[0] += 300
 			if not isMTOS and not isMaskAlpha:
-				# Prefer real image alpha channel if available, otherwise use mixed red channel
-				if hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
-					matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
-				else:
-					matInfo["alphaSocket"] = mixUVAlphaNode.outputs["Color"]
+				matInfo["alphaSocket"] = mixUVAlphaNode.outputs["Color"]
 		else:
 			if not isMTOS and not isMaskAlpha:
-				isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in ["hair", "lash", "brow", "beard"]))
-				if isSF6Hair:
-					matInfo["alphaSocket"] = separateNode.outputs["Red"]  # SF6 hair alpha is in Red channel
-				elif hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
-					matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
-				else:
-					matInfo["alphaSocket"] = separateNode.outputs["Red"]
+				matInfo["alphaSocket"] = separateNode.outputs["Red"]
+
 		if occlusionUV2Node != None or useLegacyHairUV2Occlusion:
 			mixUVOCCNode = nodeTree.nodes.new('ShaderNodeMixRGB')
 			mixUVOCCNode.location = currentPos
@@ -1405,13 +1396,8 @@ def newATOSNode (nodeTree,textureType,matInfo):
 				matInfo["cavityNodeLayerGroup"].addMixLayer(imageNode.outputs["Alpha"])
 	else:
 		if not isMTOS and not isMaskAlpha and not "StitchMap" in matInfo["textureNodeDict"]:
-			isSF6Hair = (matInfo["gameName"] == "SF6" and any(x in matInfo["mmtrName"].lower() for x in ["hair", "lash", "brow", "beard"]))
-			if isSF6Hair:
-				matInfo["alphaSocket"] = separateNode.outputs["Red"]  # SF6 hair alpha is in Red channel
-			elif hasattr(imageNode, "image") and imageNode.image is not None and getattr(imageNode.image, "channels", 0) >= 4:
-				matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
-			else:
-				matInfo["alphaSocket"] = separateNode.outputs["Red"]
+			matInfo["alphaSocket"] = separateNode.outputs["Red"]
+			
 		matInfo["translucentSocket"] = separateNode.outputs["Green"]
 		if matInfo["gameName"] != "SF6" and not useLegacyHairUV2Occlusion:#SF6 uses occlusion channel for something else
 			matInfo["aoNodeLayerGroup"].addMixLayer(separateNode.outputs["Blue"])
