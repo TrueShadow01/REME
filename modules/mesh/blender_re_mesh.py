@@ -426,8 +426,17 @@ def importMesh(meshName = "newMesh",vertexList = [],faceList = [],vertexNormalLi
         skB = meshObj.shape_key_add(name = "Basis")
         skB.interpolation = 'KEY_LINEAR'
         
+        def cleanShapeKeyName(name):
+            name = name.rsplit(".", 1)[-1]
+            name = name.replace("head_mesh__", "")
+            name = name.replace("head_mesh_", "")
+            name = name.replace("blendShapes_", "")
+            name = name.replace("blendShapes", "")
+            return name
+
         for blendShapeEntry in blendShapeList:
-                name = blendShapeEntry.blendShapeName
+                rawName = blendShapeEntry.blendShapeName
+                name = cleanShapeKeyName(rawName)
                 deltas = [Vector (val) for val in blendShapeEntry.deltas]
                 sk = meshObj.shape_key_add(name = name)
                 sk.interpolation = 'KEY_LINEAR'
