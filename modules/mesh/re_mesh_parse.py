@@ -706,10 +706,8 @@ class ParsedREMesh:
 			blendShapeStartPos = lastElement.posStartOffset + vertexCount * lastElement.stride
 			blendShapeBuffer =  reMesh.meshBufferHeader.vertexBuffer[blendShapeStartPos:]
 			if reMesh.blendShapeHeader != None:
-				
 				print(f"blendShape buffer start pos {str(reMesh.meshBufferHeader.vertexBufferOffset+blendShapeStartPos)}")
 			
-				
 				
 		#Parse Main Meshes
 		if reMesh.lodHeader != None and len(vertexDictList) != 0:

@@ -425,18 +425,12 @@ def importMesh(meshName = "newMesh",vertexList = [],faceList = [],vertexNormalLi
     if blendShapeList != []:
         skB = meshObj.shape_key_add(name = "Basis")
         skB.interpolation = 'KEY_LINEAR'
-        print(meshObj.name)
         
         for blendShapeEntry in blendShapeList:
                 name = blendShapeEntry.blendShapeName
-                print(name)
-                #print(blendShapeEntry.deltas)
                 deltas = [Vector (val) for val in blendShapeEntry.deltas]
-                #print(deltas)
                 sk = meshObj.shape_key_add(name = name)
                 sk.interpolation = 'KEY_LINEAR'
-                print(f"mesh vertices: {len(meshObj.data.vertices)}")
-                print(f"delta vertices: {len(deltas)}")
                 #if len(deltas) == len(meshObj.data.vertices):
                 for i in range(len(meshObj.data.vertices)):
                     sk.data[i].co = meshObj.data.vertices[i].co + deltas[i]

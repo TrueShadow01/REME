@@ -260,7 +260,7 @@ from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,getMHWildsDetailMapNodeGroup
 from ..ddsconv.directx.texconv import Texconv, unload_texconv
 DEBUG_MODE = False
-DEBUG_ALPHA_DIAGNOSTICS = True
+DEBUG_ALPHA_DIAGNOSTICS = False
 def debugprint(string):
 	if DEBUG_MODE:
 		print(string)
@@ -1714,8 +1714,9 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							matInfo["blenderMaterial"].alpha_threshold = 0.5
 							if matInfo["alphaSocket"] is not None:
 								links.new(matInfo["alphaSocket"], nodeBSDF.inputs["Alpha"])
-						
-						print(f"[HAIR DEBUG] material={materialName} mmtr={mmtr} alphaSocket={matInfo['alphaSocket']} threshold={matInfo['blenderMaterial'].alpha_threshold}")
+								
+						if DEBUG_ALPHA_DIAGNOSTICS:
+							print(f"[HAIR DEBUG] material={materialName} mmtr={mmtr} alphaSocket={matInfo['alphaSocket']} threshold={matInfo['blenderMaterial'].alpha_threshold}")
 					else:
 						matInfo["blenderMaterial"].blend_method = "HASHED"
 						alphaDecision = "HASHED"
