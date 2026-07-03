@@ -2349,7 +2349,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
                             else np.zeros((vertCount, 3))
                         )
                         for sStart, _sVOff, sCnt in subs3:
-                            seg = deltas[sStart : sStart + sCnt]
+                            seg = deltas[_sVOff : _sVOff + sCnt]
                             if len(seg) < sCnt:  # shape key shorter than the recorded range: zero-pad
                                 seg = np.vstack([seg, np.zeros((sCnt - len(seg), 3))])
                             shapeArrays.append(packBlendShapeDeltasStride8(seg, aabb))
