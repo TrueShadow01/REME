@@ -715,4 +715,3 @@ class WM_OT_QuickBatchExport(Operator):
         bpy.ops.re_mesh_cm.batch_exporter()
         return {"FINISHED"}
 
-
