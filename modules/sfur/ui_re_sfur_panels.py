@@ -53,8 +53,8 @@ class OBJECT_PT_SFurEntryPanel(Panel):
 	
 	@classmethod
 	def poll(self,context):
-		
-		return context and context.object.mode == "OBJECT" and context.active_object.get("~TYPE",None) == "RE_SFUR_ENTRY" and not "HIDE_RE_MDF_EDITOR_PANEL" in context.scene
+		obj = context.active_object if context else None
+		return (obj is not None and obj.mode == "OBJECT" and obj.get("~TYPE", None) == "RE_SFUR_ENTRY" and "HIDE_RE_MDF_EDITOR_PANEL" not in context.scene)
 
 	def draw(self, context):
 		layout = self.layout

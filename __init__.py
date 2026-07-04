@@ -1,5 +1,17 @@
 # Author: NSA Cloud
 
+bl_info = {
+    "name": "RE Mesh Editor (Community Maintained)",
+    "author": "NSA Cloud, TrueShadow",
+    "version": (0, 68, 0),
+    "blender": (4, 3, 2),
+    "location": "File > Import-Export",
+    "description": "Import and export RE Engine Mesh files natively into Blender. No Noesis required.",
+    "warning": "",
+    "wiki_url": "https://github.com/TrueShadow01/REME",
+    "tracker_url": "https://github.com/TrueShadow01/REME/issues",
+    "category": "Import-Export"}
+
 import os
 from datetime import datetime
 
@@ -412,17 +424,17 @@ class RemoveItemOperator(bpy.types.Operator):
     bl_label = "Remove Selected Path"
 
     def execute(self, context):
+        prefs = bpy.context.preferences.addons[__name__].preferences
+        chunkList = prefs.chunkPathList_items
 
-        chunkList = bpy.context.preferences.addons[
-            __name__
-        ].preferences.chunkPathList_items
-        index = bpy.context.preferences.addons[__name__].preferences.chunkPathList_index
+        if len(chunkList) == 0:
+            return {'CANCELLED'}
+        
+        index = min(max(0, prefs.chunkPathList_index), len(chunkList) - 1)
         chunkList.remove(index)
-        bpy.context.preferences.addons[__name__].preferences.chunkPathList_index = min(
-            max(0, index - 1), len(chunkList) - 1
-        )
-        return {"FINISHED"}
+        prefs.chunkPathList_index = min(max(0, index - 1), len(chunkList) - 1)
 
+        return {'FINISHED'}
 
 # Operator to reorder items in the list
 class ReorderItemOperator(bpy.types.Operator):
@@ -445,16 +457,22 @@ class ReorderItemOperator(bpy.types.Operator):
         )
 
     def execute(self, context):
-        chunkList = bpy.context.preferences.addons[
-            __name__
-        ].preferences.chunkPathList_items
-        index = bpy.context.preferences.addons[__name__].preferences.chunkPathList_index
+        prefs = bpy.context.preferences.addons[__name__].preferences
+        chunkList = prefs.chunkPathList_items
 
-        neighbor = index + (-1 if self.direction == "UP" else 1)
-        chunkList.move(neighbor, index)
-        self.move_index()
-        return {"FINISHED"}
+        if len(chunkList) < 2:
+            return {'CANCELLED'}
 
+        index = min(max(0, prefs.chunkPathList_index), len(chunkList) - 1)
+        neighbor = index + (-1 if self.direction == 'UP' else 1)
+
+        if neighbor < 0 or neighbor >= len(chunkList):
+            return {'CANCELLED'}
+
+        chunkList.move(index, neighbor)
+        prefs.chunkPathList_index = neighbor
+        
+        return {'FINISHED'}
 
 class MESH_UL_ChunkPathList(bpy.types.UIList):
     def draw_item(
@@ -744,9 +762,7 @@ class REMeshPreferences(AddonPreferences):
         if self.textureCacheCheckDate == "":
             checkTextureCacheSize()
         row.label(text=f"Cache Size: {self.textureCacheSizeString}")
-        row.operator(
-            "re_mesh_cm.check_texture_cache_size", icon="FILE_REFRESH", text=""
-        )
+        row.operator("re_mesh_cm.check_texture_cache_size",icon = "FILE_REFRESH",text = "")
         box.label(text=f"Last Checked: {self.textureCacheCheckDate}")
 
         box.operator("re_mesh_cm.open_texture_cache_folder")
@@ -774,6 +790,7 @@ class REMeshPreferences(AddonPreferences):
             column2.prop(self, "default_createCollections")
             column2.prop(self, "default_mergeGroups")
             column2.prop(self, "default_importArmatureOnly")
+            column2.prop(self, "default_importBlendShapes")
             column2.prop(self, "default_rotate90")
             column2.prop(self, "default_importBoundingBoxes")
         # Export defaults
@@ -995,7 +1012,8 @@ class ImportREMesh(Operator, ImportHelper):
             column2.prop(self, "createCollections")
             column2.prop(self, "mergeGroups")
             column2.prop(self, "importArmatureOnly")
-
+            column2.prop(self, "importBlendShapes")
+        
             column2.prop(self, "rotate90")
             column2.prop(self, "importBoundingBoxes")
             # column2.prop(self, "importOcclusionMeshes")
@@ -2282,3 +2300,4 @@ def unregister():
 
 if __name__ == "__main__":
     register()
+    

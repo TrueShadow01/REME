@@ -95,8 +95,8 @@ class WM_OT_ApplySFurToMeshCollection(Operator):
 		#TODO
 		
 		if sFurCollection != None and meshCollection != None:
-			
 			self.report({"INFO"},"Applied SFur to mesh collection.")
+			return {'FINISHED'}
 		else:
 			self.report({"ERROR"},"Invalid mesh or SFur collection.")
-		return {'FINISHED'}
+			return {'CANCELLED'}

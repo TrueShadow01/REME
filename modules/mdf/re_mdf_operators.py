@@ -129,6 +129,8 @@ class WM_OT_ApplyMDFToMeshCollection(Operator):
 			self.report({"INFO"},"Applied MDF to mesh collection.")
 		else:
 			self.report({"ERROR"},"Invalid mesh or MDF collection.")
+			return {'CANCELLED'}
+		
 		return {'FINISHED'}
 class WM_OT_OpenPresetFolder(Operator):
 	bl_label = "Open Preset Folder"
@@ -165,12 +167,20 @@ class WM_OT_SavePreset(Operator):
 		return {'FINISHED'}	
 	
 def update_findValueCount(self, context):
-	if context.active_object.get("~TYPE") == "RE_MDF_MATERIAL":
-		material = context.active_object.re_mdf_material
-		replaceCount = 0
-		for entry in material.textureBindingList_items:
-			replaceCount += entry.path.count(self.findValue)
-		self.instanceCount = replaceCount
+	obj = context.active_object if context else None
+
+	if obj is None or obj.get("~TYPE") != "RE_MDF_MATERIAL":
+		self.instanceCount = 0
+		return
+	
+	material = obj.re_mdf_material
+	replaceCount = 0
+
+	for entry in material.textureBindingList_items:
+		replaceCount += entry.path.count(self.findValue)
+	
+	self.instanceCount = replaceCount
+
 class WM_OT_FindReplaceTextureBindings(Operator):
 	bl_label = "Find and Replace"
 	bl_idname = "re_mdf.replace_texture_bindings"
@@ -219,34 +229,41 @@ class WM_OT_NullifyTextureBindings(Operator):
 		return context.active_object is not None
 	
 	def execute(self, context):
-		jsonPath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),"workspace","texturepacker","tex_bindings_null.json")
+		jsonPath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "workspace", "texturepacker", "tex_bindings_null.json")
+
 		try:
-			with open(jsonPath,"r", encoding ="utf-8") as file:
+			with open(jsonPath, "r", encoding="utf-8") as file:
 				texTypeDict = json.load(file)
 				print(f"Loaded {jsonPath}")
 		except Exception as err:
+			self.report({"ERROR"}, f"Failed to load texture null bindings.")
 			print(f"Failed to load {jsonPath} - {err}")
-		replaceCount = 0
-		for obj in bpy.context.selected_objects:
-			if context.active_object.get("~TYPE") == "RE_MDF_MATERIAL":
-				material = context.active_object.re_mdf_material
-				if material.gameName != "":
-					gameName = material.gameName
-				else:
-					print(f"Game name not found on {material.materialName} falling back to active game")
-					gameName = bpy.context.scene.re_mdf_toolpanel.activeGame
-				for entry in material.textureBindingList_items:
-					if entry.textureType in texTypeDict:
-						if gameName in texTypeDict[entry.textureType]:
-							entry.path = texTypeDict[entry.textureType][gameName]
-							replaceCount += 1
-						elif "generic" in texTypeDict[entry.textureType]:
-							entry.path = texTypeDict[entry.textureType]["generic"]
-							replaceCount += 1
-						else:
-							print(f"Unknown texture type {entry.textureType} on {material.materialName}, skipping.")
-				
-			self.report({"INFO"},f"Replaced {replaceCount} texture bindings.")
-			return {'FINISHED'}
-		else:
 			return {'CANCELLED'}
+		
+		replaceCount = 0
+
+		for obj in bpy.context.selected_objects:
+			if obj.get("~TYPE") != "RE_MDF_MATERIAL":
+				continue
+
+			material = obj.re_mdf_material
+
+			if material.gameName != "":
+				gameName = material.gameName
+			else:
+				print(f"Game name not found on {material.materialName} falling back to active game")
+				gameName = bpy.context.scene.re_mdf_toolpanel.activeGame
+
+			for entry in material.textureBindingList_items:
+				if entry.textureType in texTypeDict:
+					if gameName in texTypeDict[entry.textureType]:
+						entry.path = texTypeDict[entry.textureType][gameName]
+						replaceCount += 1
+					elif "generic" in texTypeDict[entry.textureType]:
+						entry.path = texTypeDict[entry.textureType]["generic"]
+						replaceCount += 1
+					else:
+						print(f"Unknown texture type {entry.textureType} on {material.materialName}, skipping.")
+
+		self.report({"INFO"}, f"Replaced {replaceCount} texture bindings.")
+		return {'FINISHED'}

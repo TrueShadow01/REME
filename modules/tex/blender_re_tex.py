@@ -59,7 +59,7 @@ def loadTex(texPath,outputPath,texConv,reloadCachedTextures,useDDS):
 						try:
 							os.remove(newDDSPath)
 						except:
-							raiseWarning("Could not delete temporary dds file: {newDDSPath}")
+							raiseWarning(f"Could not delete temporary dds file: {newDDSPath}")
 			else:#Convert single image tex
 				if arrayMaxExceeded:
 					digitCount = max((2,len(str(texInfo["arrayNum"]))))
@@ -74,7 +74,7 @@ def loadTex(texPath,outputPath,texConv,reloadCachedTextures,useDDS):
 					try:
 						os.remove(ddsPath)
 					except:
-						raiseWarning("Could not delete temporary dds file: {ddsPath}")
+						raiseWarning(f"Could not delete temporary dds file: {ddsPath}")
 	return blenderImageList
 
 supportedImageExtensionsSet = set([".png",".tga",".tif"])#Not implemented yet

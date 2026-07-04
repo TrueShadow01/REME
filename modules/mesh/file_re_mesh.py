@@ -1672,7 +1672,7 @@ class REMesh:
         self.meshRegionBytes = b""  # MH Wilds: pre-serialized mesh region (streamed layout)
 
     def read(
-        self, file, version, lodTarget=None, streamingBuffer=None
+        self, file, version, lodTarget=None, streamingBuffer=None, importBlendShapes=IMPORT_BLEND_SHAPES
     ):  # LOD target is an int that determines what lod level to import, the rest get ignored
         self.streamingBuffer = streamingBuffer
         if streamingBuffer is not None:
@@ -1708,7 +1708,7 @@ class REMesh:
 			self.normalRecalcHeader.read(file,sum([i.vertexCount for i in self.lodHeader.lodGroupList[0].meshGroupList]),sum([i.faceCount for i in self.lodHeader.lodGroupList[0].meshGroupList]))
 		"""
         if self.fileHeader.blendShapesOffset and (
-            IMPORT_BLEND_SHAPES
+            importBlendShapes
             or self.meshVersion in WILDS_PACKED_BLEND_SHAPE_FILE_VERSIONS
         ):
             file.seek(self.fileHeader.blendShapesOffset)
@@ -3334,7 +3334,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 # ---RE MESH IO FUNCTIONS---#
 
 
-def readREMesh(filepath, lodTarget=None):
+def readREMesh(filepath, lodTarget=None, importBlendShapes=IMPORT_BLEND_SHAPES):
     print("Opening " + filepath)
     try:
         file = open(filepath, "rb", buffering=8192)
@@ -3405,7 +3405,7 @@ def readREMesh(filepath, lodTarget=None):
     else:
         reMeshFile = REMesh()
     reMeshFile.meshVersion = meshVersion
-    reMeshFile.read(file, version, lodTarget, streamingBuffer)
+    reMeshFile.read(file, version, lodTarget, streamingBuffer, importBlendShapes)
     file.close()
     return reMeshFile
 

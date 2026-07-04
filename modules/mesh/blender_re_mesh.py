@@ -538,22 +538,29 @@ def importMesh(
 
     # Import Blend Shapes
     if blendShapeList != []:
-        # Stash the original MH Wilds blend-block layout so export can rebuild the exact structure.
+        # Store the original MH Wilds metadata for inspection/research only
         if blendMeta is not None:
             import json
             # Stored for inspection/future research only
             # Faithful vanilla blend metadata re-export not currently supported
             meshObj["re_wilds_blend_meta"] = json.dumps(blendMeta)
+            
         skB = meshObj.shape_key_add(name="Basis")
         skB.interpolation = "KEY_LINEAR"
-        print(meshObj.name)
+        
+        def cleanShapeKeyName(name):
+            name = name.rsplit(".", 1)[-1]
+            name = name.replace("head_mesh__", "")
+            name = name.replace("head_mesh_", "")
+            name = name.replace("blendShapes_", "")
+            name = name.replace("blendShapes", "")
+            return name
 
         # Deltas are decoded in game space; rotate them to match the mesh's rotated basis.
         rot3 = rotate90Matrix.to_3x3() if rotate90 else None
         for blendShapeEntry in blendShapeList:
-            name = blendShapeEntry.blendShapeName
-            print(name)
-            # print(blendShapeEntry.deltas)
+            rawName = blendShapeEntry.blendShapeName
+            name = cleanShapeKeyName(rawName)
             if rot3 is not None:
                 deltas = [rot3 @ Vector(val) for val in blendShapeEntry.deltas]
             else:
@@ -866,7 +873,7 @@ def importREMeshFile(filePath, options):
         lodTarget = None
     else:
         lodTarget = 0
-    reMesh = readREMesh(filePath, lodTarget)
+    reMesh = readREMesh(filePath,lodTarget,options["importBlendShapes"])
     meshFileName = os.path.splitext(os.path.split(filePath)[1])[0]
     meshParseStartTime = time.time()
     parsedMesh = ParsedREMesh()
@@ -2411,4 +2418,5 @@ def exportREMeshFile(filePath, options):
             icon="ERROR",
         )
     print("\033[92m__________________________________\nRE Mesh export finished.\033[0m")
-    return True
+    return True	
+    

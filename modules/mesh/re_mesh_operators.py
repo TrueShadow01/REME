@@ -61,18 +61,15 @@ class WM_OT_RenameMeshToREFormat(Operator):
                     try:
                         groupID = int(selectedObj.name.split("Group_")[1].split("_")[0])
                     except:
-                        pass
+                        print(f"Could not parse group ID in {selectedObj.name}, setting to 0")
+                        groupID = 0
                 else:
-                    print(
-                        "Could not parse group ID in {selectedObj.name}, setting to 0"
-                    )
+                    print(f"Could not parse group ID in {selectedObj.name}, setting to 0")
                     groupID = 0
                 if groupID not in groupIndexDict:
                     groupIndexDict[groupID] = 0
                 if len(selectedObj.data.materials) > 0:
-                    materialName = (
-                        selectedObj.data.materials[0].name.split(".", 1)[0].strip()
-                    )
+                    materialName = (selectedObj.data.materials[0].name.split(".", 1)[0].strip())
                 else:
                     materialName = "NO_MATERIAL"
                 selectedObj.name = f"Group_{str(groupID)}_Sub_{str(groupIndexDict[groupID])}__{materialName}"
@@ -86,8 +83,6 @@ class WM_OT_RenameMeshToREFormat(Operator):
 
 
 # Weights
-
-
 class WM_OT_RemoveZeroWeightVertexGroups(Operator):
     """Remove all vertex groups that have no weight assigned to them"""
 
@@ -100,12 +95,12 @@ class WM_OT_RemoveZeroWeightVertexGroups(Operator):
         else:
             selection = bpy.context.scene.objects
         for obj in selection:
+          if obj.type != "MESH":
+				      continue
+              
             emptyGroupList = []
             for vertexGroup in obj.vertex_groups:
-                if not any(
-                    vertexGroup.index in [g.group for g in v.groups]
-                    for v in obj.data.vertices
-                ):
+                if not any(vertexGroup.index in [g.group for g in v.groups] for v in obj.data.vertices):
                     emptyGroupList.append(vertexGroup)
             for group in emptyGroupList:
                 obj.vertex_groups.remove(group)
@@ -114,7 +109,6 @@ class WM_OT_RemoveZeroWeightVertexGroups(Operator):
         else:
             self.report({"INFO"}, "Removed empty vertex groups on selected objects.")
         return {"FINISHED"}
-
 
 class WM_OT_LimitTotalNormalizeAll(Operator):
     """Limits the amount of bones influences per vertex and normalizes the weights of all vertex groups for all selected meshes"""
