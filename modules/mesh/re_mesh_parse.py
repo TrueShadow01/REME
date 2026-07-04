@@ -392,7 +392,7 @@ class SubMesh:
         self.linkedSubMesh = None
         self.subMeshIndex = 0
         self.blendShapeList = []
-        self.wildsBlendMeta = None  # MH Wilds: original blend-block layout for faithful re-export
+        self.wildsBlendMeta = None  # MH Wilds: original blend-block layout stored for inspection/research
         # DD2 shape key weights
         self.secondaryWeightList = []
         self.secondaryWeightIndicesList = []
@@ -543,7 +543,7 @@ def _decodeWildsBlendShapes(reMesh):
         return bsData.aabbList[0] if bsData.aabbList else AABB()
 
     def buildBlockMeta(bsData):
-        # Serializable snapshot of one BlendShapeData block, for faithful re-export.
+        # Serializable snapshot of one BlendShapeData block, stored for inspection/research
         targets = []
         for ti, bt in enumerate(bsData.blendTargetList):
             aabb = targetAABB(bsData, ti)

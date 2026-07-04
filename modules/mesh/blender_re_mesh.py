@@ -2143,13 +2143,6 @@ def exportREMeshFile(filePath, options):
                             parsedSubMesh.blendShapeList.append(blendShapeEntry)
                         # Faithful re-export of imported MH Wilds metadata is not supported yet
                         # Keep imported metadata on the Blender object for inspection only
-                        # do not pass it into ParsedREMeshToREMesh because it triggers a unfinished path
-                        #metaJson = rawsubmesh.get("re_wilds_blend_meta")
-                        #if metaJson:
-                        #    import json
-                        #    try:
-                        #        parsedSubMesh.wildsBlendMeta = json.loads(metaJson)
-                        #    except Exception:
                         parsedSubMesh.wildsBlendMeta = None
                     else:
                         raiseWarning(
