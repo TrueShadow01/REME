@@ -160,7 +160,7 @@ from .modules.workspace.ui_re_mod_workspace_panels import (
 bl_info = {
     "name": "RE Mesh Editor (Community Maintained)",
     "author": "NSA Cloud, TrueShadow",
-    "version": (0, 67, 8),
+    "version": (0, 68, 0),
     "blender": (4, 3, 2),
     "location": "File > Import-Export",
     "description": "Import and export RE Engine Mesh files natively into Blender. No Noesis required.",
