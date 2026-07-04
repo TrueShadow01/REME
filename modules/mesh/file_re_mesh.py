@@ -1403,9 +1403,13 @@ class BlendShapeData:
         self.padding2 = read_uint(file)
         self.dataOffset = read_uint64(file)  # [Target count]
         self.aabbOffset = read_uint64(file)
-        self.blendSOffset = read_uint64(file)
-        self.blendSSOffset = read_uint64(file)
+
+        if version >= VERSION_SF6:
+            self.blendSOffset = read_uint64(file)
+            self.blendSSOffset = read_uint64(file)
+
         file.seek(self.dataOffset)
+        self.blendTargetList = []
         for i in range(0, self.targetCount):
             blendTargetEntry = BlendTarget()
             blendTargetEntry.read(file, version)
@@ -1416,7 +1420,14 @@ class BlendShapeData:
             aabbEntry = AABB()
             aabbEntry.read(file)
             self.aabbList.append(aabbEntry)
+
+        if version >= VERSION_SF6:
+            file.seek(self.blendSOffset)
+
         self.blendS = [read_int(file), read_int(file), read_int(file)]
+        if version >= VERSION_SF6:
+            file.seek(self.blendSSOffset)
+
         self.blendSSList = []
         for blendTarget in self.blendTargetList:
             for i in range(0, blendTarget.blendShapeNum):
@@ -1454,15 +1465,24 @@ class BlendShapeHeader:
         # TODO Blend shapes are different in wilds, fix
 
     def read(self, file, version):
-        self.count = read_uint64(file)
-        if version < VERSION_ONI2:
+        if version < VERSION_SF6:
+            self.count = read_ubyte(file)
+            file.seek(7, 1)
             self.mainOffset = read_uint64(file)
             self.zero = read_uint64(file)
+            self.hash = read_uint64(file)
         else:
-            self.zero = read_uint64(file)
-            self.mainOffset = read_uint64(file)
-        self.hash = read_uint64(file)
+            self.count = read_uint64(file)
+            if version < VERSION_ONI2:
+                self.mainOffset = read_uint64(file)
+                self.zero = read_uint64(file)
+            else:
+                self.zero = read_uint64(file)
+                self.mainOffset = read_uint64(file)
+            self.hash = read_uint64(file)
+
         self.blendShapeOffsetList = []
+        file.seek(self.mainOffset)
         for i in range(0, self.count):
             self.blendShapeOffsetList.append(read_uint64(file))
         self.blendShapeList = []
