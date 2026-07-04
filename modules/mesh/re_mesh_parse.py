@@ -619,7 +619,7 @@ def _decodeWildsBlendShapes(reMesh):
                 cur = ((len(tail) - lodTotalDeltaBytes(bsData)) // 16) * 16
             lodDict = {}
             for ti, bt in enumerate(bsData.blendTargetList):
-                cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict, splitBySubmesh=True)
+                cur += decodeTarget(tail, cur, bt, targetAABB(bsData, ti), lodDict)
             if lodDict:
                 result[lodIndex] = lodDict
                 # The region base = first target's first subEntry start (= the owning submesh's
