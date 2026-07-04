@@ -2325,45 +2325,7 @@ def buildWildsBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
         blockBlendS = None
         metaSubs = [bs for bs in blendSubs if getattr(bs[3], "wildsBlendMeta", None)]
         if metaSubs:
-            # Faithful re-export path: rebuild the original block layout from the metadata captured at
-            # import (target grouping, subEntries, typing, per-target AABB, blendS), slicing each shape
-            # key's deltas into the recorded sub-ranges so the buffer matches the original bytes.
-            for startIdx, vertCount, shapes, sm in metaSubs:
-                meta = sm.wildsBlendMeta
-                blockTyping = meta.get("typing")
-                blockBlendS = meta.get("blendS")
-                shapeByName = {bs.blendShapeName: bs for bs in shapes}
-                for mt in meta["targets"]:
-                    aabb = AABB()
-                    aabb.min.x, aabb.min.y, aabb.min.z = mt["aabbMin"]
-                    aabb.max.x, aabb.max.y, aabb.max.z = mt["aabbMax"]
-                    subs3 = [tuple(se) for se in mt["subEntries"]]  # (startIdx, vertOffset, vertCount)
-                    ssIndex = len(blendNames)
-                    shapeArrays = []
-                    for nm in mt["names"]:
-                        blendNames.append(nm)
-                        bs = shapeByName.get(nm)
-                        deltas = (
-                            np.asarray(bs.deltas, dtype=np.float64).reshape(-1, 3)
-                            if bs is not None
-                            else np.zeros((vertCount, 3))
-                        )
-                        for sStart, _sVOff, sCnt in subs3:
-                            seg = deltas[_sVOff : _sVOff + sCnt]
-                            if len(seg) < sCnt:  # shape key shorter than the recorded range: zero-pad
-                                seg = np.vstack([seg, np.zeros((sCnt - len(seg), 3))])
-                            shapeArrays.append(packBlendShapeDeltasStride8(seg, aabb))
-                    deltaChunks.append(np.concatenate(shapeArrays).astype("<u4").tobytes())
-                    targets.append(
-                        {
-                            "blendShapeNum": mt["blendShapeNum"],
-                            "subEntries3": subs3,
-                            "aabb": aabb,
-                            "blendSSIndex": ssIndex,
-                        }
-                    )
-            perLodList.append({"targets": targets, "typing": blockTyping, "blendS": blockBlendS})
-            continue
+            print("WARNING: Faithful re-export of original MH Wilds blend metadata is not supported. Rebuilding shape keys as custom single-file blend targets instead.")
         if blendSubs:
             # The engine runs every submesh through the blend pipeline, so the merged region spans all
             # submeshes in vertex order with non-morph submeshes contributing zero deltas; each morph

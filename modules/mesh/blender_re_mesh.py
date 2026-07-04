@@ -541,6 +541,8 @@ def importMesh(
         # Stash the original MH Wilds blend-block layout so export can rebuild the exact structure.
         if blendMeta is not None:
             import json
+            # Stored for inspection/future research only
+            # Faithful vanilla blend metadata re-export not currently supported
             meshObj["re_wilds_blend_meta"] = json.dumps(blendMeta)
         skB = meshObj.shape_key_add(name="Basis")
         skB.interpolation = "KEY_LINEAR"
@@ -2139,15 +2141,16 @@ def exportREMeshFile(filePath, options):
                                 (skCo - basisCo) @ blendRot.T
                             ).astype(np.float32)
                             parsedSubMesh.blendShapeList.append(blendShapeEntry)
-                        # Recover the original blend-block layout (target grouping, subEntries, typing,
-                        # AABBs, blendS) stashed at import, so the exporter can rebuild it exactly.
-                        metaJson = rawsubmesh.get("re_wilds_blend_meta")
-                        if metaJson:
-                            import json
-                            try:
-                                parsedSubMesh.wildsBlendMeta = json.loads(metaJson)
-                            except Exception:
-                                parsedSubMesh.wildsBlendMeta = None
+                        # Faithful re-export of imported MH Wilds metadata is not supported yet
+                        # Keep imported metadata on the Blender object for inspection only
+                        # do not pass it into ParsedREMeshToREMesh because it triggers a unfinished path
+                        #metaJson = rawsubmesh.get("re_wilds_blend_meta")
+                        #if metaJson:
+                        #    import json
+                        #    try:
+                        #        parsedSubMesh.wildsBlendMeta = json.loads(metaJson)
+                        #    except Exception:
+                        parsedSubMesh.wildsBlendMeta = None
                     else:
                         raiseWarning(
                             f"Shape key vertex count mismatch on {rawsubmesh.name}; skipping blend shape export."
