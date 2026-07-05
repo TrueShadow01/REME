@@ -3,7 +3,7 @@
 bl_info = {
     "name": "RE Mesh Editor (Community Maintained)",
     "author": "NSA Cloud, TrueShadow",
-    "version": (0, 68, 5),
+    "version": (0, 68, 7),
     "blender": (4, 3, 2),
     "location": "File > Import-Export",
     "description": "Import and export RE Engine Mesh files natively into Blender. No Noesis required.",
@@ -1036,7 +1036,7 @@ class ImportREMesh(Operator, ImportHelper):
             "importOcclusionMeshes": self.importOcclusionMeshes,
             "importBoundingBoxes": self.importBoundingBoxes,
         }
-        editorVersion = str(bl_info["version"][0]) + "." + str(bl_info["version"][1])
+        editorVersion = ".".join(str(part) for part in bl_info["version"])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(
             f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}"
