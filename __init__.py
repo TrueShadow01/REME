@@ -169,19 +169,6 @@ from .modules.workspace.ui_re_mod_workspace_panels import (
     OBJECT_PT_REModWorkspacePanel,
 )
 
-bl_info = {
-    "name": "RE Mesh Editor (Community Maintained)",
-    "author": "NSA Cloud, TrueShadow",
-    "version": (0, 68, 0),
-    "blender": (4, 3, 2),
-    "location": "File > Import-Export",
-    "description": "Import and export RE Engine Mesh files natively into Blender. No Noesis required.",
-    "warning": "",
-    "wiki_url": "https://github.com/TrueShadow01/REME",
-    "tracker_url": "https://github.com/TrueShadow01/REME/issues",
-    "category": "Import-Export",
-}
-
 os.system("color")  # Enable console colors
 
 
