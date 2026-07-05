@@ -53,7 +53,7 @@ from .file_re_mesh_mply import REMeshMPLY
 # 5. The parsed mesh format is rebuilt inside blender_re_mesh.py once it has been error checked
 # 6. The parsed format is passed back to file_re_mesh.py and rebuilt into a mesh structure (ParsedREMeshToREMesh())
 
-IMPORT_BLEND_SHAPES = False  # Legacy (SF6 and earlier) blend shape import is still broken; keep disabled.
+IMPORT_BLEND_SHAPES = False  # Blender import UI passes user's Import Blend Shapes option. Legacy Importer is experimental for the time being
 
 # MH Wilds single-file blend shape export: writes a self-contained base .mesh (single LOD) whose blend
 # block and per-shape deltas live in the resident (vbi=0) vertex buffer, with no streaming companion.
