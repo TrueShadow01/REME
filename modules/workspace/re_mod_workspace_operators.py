@@ -1200,11 +1200,14 @@ class WM_OT_LaunchGame(Operator):
                 self.report({"ERROR"},f"Install the asset library for {gameName} and set the game extract paths first.")
                 return {'CANCELLED'}
             
-            if platform.system() == 'Windows' and os.path.isfile(exePath):
-                os.startfile(exePath)
-            else:
-                self.report({"ERROR"},f"This feature is only supported on Windows.")
-                    
+            if platform.system() != "Windows":
+                self.report({"ERROR"}, "This feature is only supported on Windows.")
+                return {'CANCELLED'}
+            if not os.path.isfile(exePath):
+                self.report({"ERROR"}, f"Game executable was not found: {exePath}")
+                return {'CANCELLED'}
+
+        os.startfile(exePath)        
         return {'FINISHED'}
     
 class WM_OT_OpenModWorkspace(Operator):
