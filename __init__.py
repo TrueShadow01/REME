@@ -470,24 +470,17 @@ class MESH_UL_ChunkPathList(bpy.types.UIList):
 
 
 def checkTextureCacheSize():
-    try:
-        bpy.context.preferences.addons[
-            __name__
-        ].preferences.textureCacheSizeString = formatByteSize(
-            getFolderSize(
-                bpy.path.abspath(
-                    bpy.context.preferences.addons[
-                        __name__
-                    ].preferences.textureCachePath
-                )
-            )
-        )
-        timestamp = str(datetime.now()).split(".")[0]
-        bpy.context.preferences.addons[
-            __name__
-        ].preferences.textureCacheCheckDate = timestamp
-    except:
-        pass
+    prefs = bpy.context.preferences.addons[__name__].preferences
+    cache_path = bpy.path.abspath(prefs.textureCachePath)
+
+    size = getFolderSize(cache_path)
+    if size is None:
+        prefs.textureCacheSizeString = "Unavailable"
+    else:
+        prefs.textureCacheSizeString = formatByteSize(size)
+    
+    timestamp = str(datetime.now()).split(".")[0]
+    prefs.textureCacheCheckDate = timestamp
 
 
 class REMeshPreferences(AddonPreferences):

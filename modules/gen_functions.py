@@ -69,13 +69,13 @@ def read_string(file_object):
      data =''.join(iter(lambda: file_object.read(1).decode('utf-8'), '\x00'))
      return data
 def read_unicode_string(file_object):#Reads unicode string from file into utf-8 string
-	wchar = file_object.read(2)
-	byteString = wchar
-	while wchar != b'\x00\x00':
-		wchar = file_object.read(2)
-		byteString += wchar 
-	unicodeString = byteString.decode("utf-16le").replace('\x00', '')
-	return unicodeString
+    wchar = file_object.read(2)
+    byteString = wchar
+    while wchar != b'\x00\x00':
+        wchar = file_object.read(2)
+        byteString += wchar 
+    unicodeString = byteString.decode("utf-16le").replace('\x00', '')
+    return unicodeString
 # write unsigned byte to file
 def write_ubyte(file_object,input, endian = '<'):
      data = struct.pack(endian+'B', input)
@@ -154,32 +154,36 @@ def insertByteSection(byteArray,offset,input):#inserts bytes into bytearray at o
     byteArray[offset:offset] = input
 
 def dictString(dictionary):#Return string of dictionary contents
-	outputString =""
-	for key,value in dictionary.items():
-		outputString +=str(key)+": "+str(value)+"\n"
-	return outputString
+    outputString =""
+    for key,value in dictionary.items():
+        outputString +=str(key)+": "+str(value)+"\n"
+    return outputString
 def unsignedToSigned(uintValue):
-	intValue = uintValue & ((1 << 32) - 1)
-	intValue = (intValue & ((1 << 31) - 1)) - (intValue & (1 << 31))
-	return intValue
+    intValue = uintValue & ((1 << 32) - 1)
+    intValue = (intValue & ((1 << 31) - 1)) - (intValue & (1 << 31))
+    return intValue
 def signedToUnsigned(intValue):
-	return intValue & 0xffffffff
+    return intValue & 0xffffffff
 
 def getPaddedPos(currentPos,alignment):
-	paddedPos = ((currentPos*-1)%alignment)+currentPos
-	return paddedPos
+    paddedPos = ((currentPos*-1)%alignment)+currentPos
+    return paddedPos
 
 def getFolderSize(path='.'):
-	total = 0
-	try:
-		for entry in os.scandir(path):
-			if entry.is_file():
-				total += entry.stat().st_size
-			elif entry.is_dir():
-				total += getFolderSize(entry.path)
-	except:
-		total = -1
-	return total
+    total = 0
+    try:
+        for entry in os.scandir(path):
+            if entry.is_file():
+                total += entry.stat().st_size
+            elif entry.is_dir():
+                child_size = getFolderSize(entry.path)
+                if child_size is None:
+                  return None
+                total += child_size
+    except OSError as err:
+        print(f"Failed to get folder size for {path}: {err}")
+        return None
+    return total
 
 def formatByteSize(num, suffix="B"):
     for unit in ("", "K", "M", "G", "T", "P", "E", "Z"):
@@ -189,37 +193,37 @@ def formatByteSize(num, suffix="B"):
     return f"{num:.1f}Yi{suffix}"
 
 def wildCardFileSearch(wildCardFilePath):#Returns first file found matching wildcard, none if not found
-	search = glob.glob(wildCardFilePath)
-	if search == []:
-		search = [None]
-	return search[0]
+    search = glob.glob(wildCardFilePath)
+    if search == []:
+        search = [None]
+    return search[0]
 
 def wildCardFileSearchList(wildCardFilePath):#Returns all files matching wildcard
-	search = glob.glob(wildCardFilePath)
-	return search
+    search = glob.glob(wildCardFilePath)
+    return search
 
 def splitNativesPath(filePath):#Splits file path of RE Engine natives/platform folder, returns none if there's no natives folder
-	path = Path(filePath)	
-	parts = path.parts
-	try:
-		if "natives" in filePath.lower():
-			nativesIndex = next((i for i, part in enumerate(parts) if part.lower() == "natives"), None)
-			rootPath = str(Path(*parts[:nativesIndex+2]))#stage\m01\a02\m01a02_iwa.mesh.2109148288
-			nativesPath = str(Path(*parts[nativesIndex+2::]))#F:\MHR_EXTRACT\extract\re_chunk_000\natives\STM
-			return (rootPath,nativesPath)
-		else:
-			return None
-	except:
-		return None
-	
+    path = Path(filePath)	
+    parts = path.parts
+    try:
+        if "natives" in filePath.lower():
+            nativesIndex = next((i for i, part in enumerate(parts) if part.lower() == "natives"), None)
+            rootPath = str(Path(*parts[:nativesIndex+2]))#stage\m01\a02\m01a02_iwa.mesh.2109148288
+            nativesPath = str(Path(*parts[nativesIndex+2::]))#F:\MHR_EXTRACT\extract\re_chunk_000\natives\STM
+            return (rootPath,nativesPath)
+        else:
+            return None
+    except:
+        return None
+    
 def getAdjacentFileVersion(rootPath,fileType):
-	fileVersion = -1
-	search = wildCardFileSearch(os.path.join(glob.escape(rootPath),"*"+fileType+"*"))
-	if search != None:
-		versionExtension = os.path.splitext(search)[1][1::]
-		if versionExtension.isdigit():
-			fileVersion = int(versionExtension)
-	return fileVersion
+    fileVersion = -1
+    search = wildCardFileSearch(os.path.join(glob.escape(rootPath),"*"+fileType+"*"))
+    if search != None:
+        versionExtension = os.path.splitext(search)[1][1::]
+        if versionExtension.isdigit():
+            fileVersion = int(versionExtension)
+    return fileVersion
 
 def progressBar(iterable, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
     """
@@ -248,23 +252,23 @@ def progressBar(iterable, prefix = '', suffix = '', decimals = 1, length = 100, 
         printProgressBar(i + 1)
     # Print New Line on Complete
     print()
-	
+    
 
 IS_WINDOWS = platform.system() == 'Windows'
 def resolvePath(pathString):
-	if IS_WINDOWS:
-		return pathString
-	else:#Fix issues related to case sensitive paths on linux, doesn't matter on windows
-		newPath = pathString.replace("/",os.sep).replace("\\",os.sep)
-		if not os.path.isfile(newPath):#Lower case the path in case the pak list is lowercased
-			newPath = newPath.lower()
-			return newPath
-		
+    if IS_WINDOWS:
+        return pathString
+    else:#Fix issues related to case sensitive paths on linux, doesn't matter on windows
+        newPath = pathString.replace("/",os.sep).replace("\\",os.sep)
+        if not os.path.isfile(newPath):#Lower case the path in case the pak list is lowercased
+            newPath = newPath.lower()
+            return newPath
+        
 def splitInt64(value):#Takes int64 and converts to 2 int32's
-	return struct.unpack("ii", value.to_bytes(8, "little", signed=False))
+    return struct.unpack("ii", value.to_bytes(8, "little", signed=False))
 
 def concatInt(a, b):#Combines two int values into a int64
-	return (a << 32) | b
+    return (a << 32) | b
 
 def slugify(value, allow_unicode=False):
     """
@@ -294,8 +298,8 @@ def openFolder(path):
         subprocess.Popen(["xdg-open", path])
 
 def isLinux():
-	return not IS_WINDOWS
-	
+    return not IS_WINDOWS
+    
 def _case_insensitive_pattern(name):
     escaped = glob.escape(name)
     pattern = ""
@@ -339,4 +343,4 @@ def resolveLinuxPath(path):
         current = matches[0]
 
     return current
-	
+    
