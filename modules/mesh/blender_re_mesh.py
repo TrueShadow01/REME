@@ -154,6 +154,29 @@ def joinObjects(objList):
             bpy.ops.object.join()
     return bpy.context.active_object
 
+def applyMDFMaterialNames(parsedMesh, mdfFile):
+    maxMaterialIndex = -1
+    for lod in parsedMesh.mainMeshLODList:
+        for group in lod.visconGroupList:
+            for subMesh in group.subMeshList:
+                maxMaterialIndex = max(maxMaterialIndex, subMesh.materialIndex)
+    
+    if maxMaterialIndex < 0:
+        return False
+
+    mdfMaterialNames = [material.materialName for material in mdfFile.materialList]
+    if not mdfMaterialNames:
+        return False
+
+    materialNameList = []
+    for materialIndex in range(maxMaterialIndex + 1):
+        if materialIndex < len(mdfMaterialNames):
+            materialNameList.append(mdfMaterialNames[materialIndex])
+        else:
+            materialNameList.append(f"Material_{materialIndex:03d}")
+    
+    parsedMesh.materialNameList = materialNameList
+    return True
 
 def createMaterialDict(materialNameList):
     materialDict = {}
@@ -882,6 +905,25 @@ def importREMeshFile(filePath, options):
     meshParseEndTime = time.time()
     meshParseTime = meshParseEndTime - meshParseStartTime
     print(f"Mesh parsing took {timeFormat % (meshParseTime * 1000)} ms.")
+    mdfPath = None
+    mdfFile = None
+
+    if options["loadMaterials"] or options["loadMDFData"]:
+        if options["mdfPath"] != "":
+            mdfPath = options["mdfPath"]
+        else:
+            mdfPath = findMDFPathFromMeshPath(filePath, gameName)
+        
+        if mdfPath is not None:
+            try:
+                mdfFile = readMDF(mdfPath)
+            except Exception as err:
+                warningList.append("Could not read MDF material names from " + mdfPath + ": " + str(err))
+    
+    if not reMesh.materialNameRemapList and mdfFile is not None:
+        if applyMDFMaterialNames(parsedMesh, mdfFile):
+            print("Mesh has no material remap list, using MDF material order.")
+
     armatureObj = None
     parentCollection = None  # Collection for grouping mesh and mdf
     if options["createCollections"]:
@@ -958,11 +1000,6 @@ def importREMeshFile(filePath, options):
     meshOffsetDict.clear()
     if options["loadMaterials"] or options["loadMDFData"]:
         # print(filePath.split(".mesh")[1])
-        if options["mdfPath"] != "":
-            mdfPath = options["mdfPath"]
-        else:
-            mdfPath = findMDFPathFromMeshPath(filePath, gameName)
-            # print(mdfPath)
         try:
             if mdfPath is not None:
                 split = splitNativesPath(mdfPath)
@@ -987,7 +1024,8 @@ def importREMeshFile(filePath, options):
                 if options["loadMaterials"] and not options["importArmatureOnly"]:
                     if options["loadMDFData"]:
                         print("Loading Mesh Materials From MDF...")
-                    mdfFile = readMDF(mdfPath)
+                    if mdfFile is None:
+                        mdfFile = readMDF(mdfPath)
                     importMDF(
                         mdfFile,
                         materialDict,

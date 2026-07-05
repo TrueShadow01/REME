@@ -1002,6 +1002,20 @@ class ParsedREMesh:
 				self.materialNameList.append(reMesh.rawNameList[remapIndex])
 			else:
 				self.materialNameList.append(f"INVALID_MATERIAL_{remapIndex}")
+		
+		if not self.materialNameList and reMesh.lodHeader is not None:
+			maxMaterialIndex = -1
+			for lodGroup in reMesh.lodHeader.lodGroupList:
+				for meshGroup in lodGroup.meshGroupList:
+					for meshInfo in meshGroup.vertexInfoList:
+						maxMaterialIndex = max(maxMaterialIndex, meshInfo.materialIndex)
+
+			for materialIndex in range(maxMaterialIndex + 1):
+				if materialIndex < len(reMesh.rawNameList):
+					self.materialNameList.append(reMesh.rawNameList[materialIndex])
+				else:
+					self.materialNameList.append(f"Material_{materialIndex:03d}")
+
 		if reMesh.skeletonHeader is not None:
 			self.skeleton = Skeleton()
 			self.skeleton.weightedBones = []

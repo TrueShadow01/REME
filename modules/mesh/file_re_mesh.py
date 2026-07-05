@@ -494,10 +494,10 @@ class MainMeshHeader:
         # padding align 16
 
     def read(self, file, version, lodTarget=None):
-        self.lodGroupCount = read_byte(file)
-        self.materialCount = read_byte(file)
-        self.uvCount = read_byte(file)
-        self.skinWeightCount = read_byte(file)
+        self.lodGroupCount = read_ubyte(file)
+        self.materialCount = read_ubyte(file)
+        self.uvCount = read_ubyte(file)
+        self.skinWeightCount = read_ubyte(file)
         self.totalMeshCount = read_ushort(file)
         self.has32BitIndexBuffer = read_byte(file)
         self.sharedLodBits = read_ubyte(file)
@@ -530,10 +530,10 @@ class MainMeshHeader:
         file.seek(getPaddedPos(file.tell(), 16))
 
     def write(self, file, version):
-        write_byte(file, self.lodGroupCount)
-        write_byte(file, self.materialCount)
-        write_byte(file, self.uvCount)
-        write_byte(file, self.skinWeightCount)
+        write_ubyte(file, self.lodGroupCount)
+        write_ubyte(file, self.materialCount)
+        write_ubyte(file, self.uvCount)
+        write_ubyte(file, self.skinWeightCount)
         write_ushort(file, self.totalMeshCount)
         write_byte(file, self.has32BitIndexBuffer)
         write_ubyte(file, self.sharedLodBits)
@@ -568,10 +568,10 @@ class ShadowHeader:
         self.lodGroupList = []
 
     def read(self, file, version):
-        self.lodGroupCount = read_byte(file)
-        self.materialCount = read_byte(file)
-        self.uvCount = read_byte(file)
-        self.skinWeightCount = read_byte(file)
+        self.lodGroupCount = read_ubyte(file)
+        self.materialCount = read_ubyte(file)
+        self.uvCount = read_ubyte(file)
+        self.skinWeightCount = read_ubyte(file)
         self.totalMeshCount = read_uint(file)
         if version < VERSION_RE8:
             self.nullPadding = read_uint64(file)
@@ -602,10 +602,10 @@ class ShadowHeader:
 
     def write(self, file, version):
         # print(file.tell())
-        write_byte(file, self.lodGroupCount)
-        write_byte(file, self.materialCount)
-        write_byte(file, self.uvCount)
-        write_byte(file, self.skinWeightCount)
+        write_ubyte(file, self.lodGroupCount)
+        write_ubyte(file, self.materialCount)
+        write_ubyte(file, self.uvCount)
+        write_ubyte(file, self.skinWeightCount)
         write_uint(file, self.totalMeshCount)
         if version < VERSION_RE8:
             write_uint64(file, self.nullPadding)
