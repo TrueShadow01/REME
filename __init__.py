@@ -1367,7 +1367,7 @@ class ExportREMesh(Operator, ExportHelper):
                 {"INFO"}, "Mesh file path is missing number extension. Cannot export."
             )
             return {"CANCELLED"}
-        editorVersion = str(bl_info["version"][0]) + "." + str(bl_info["version"][1])
+        editorVersion = ".".join(str(part) for part in bl_info["version"])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(
             f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}"
@@ -1439,7 +1439,7 @@ class ImportREMDF(bpy.types.Operator, ImportHelper):
     filter_glob: StringProperty(default="*.mdf2.*", options={"HIDDEN"})
 
     def execute(self, context):
-        editorVersion = str(bl_info["version"][0]) + "." + str(bl_info["version"][1])
+        editorVersion = ".".join(str(part) for part in bl_info["version"])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(
             f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}"
@@ -1583,7 +1583,7 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
             row.alert = True
 
     def execute(self, context):
-        editorVersion = str(bl_info["version"][0]) + "." + str(bl_info["version"][1])
+        editorVersion = ".".join(str(part) for part in bl_info["version"])
         print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
         print(
             f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}"
