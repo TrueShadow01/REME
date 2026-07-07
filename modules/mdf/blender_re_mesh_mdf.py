@@ -364,9 +364,10 @@ def findMDFPathFromMeshPath(meshPath,gameName = None):
 		if not os.path.isfile(mdfPath):
 			print(f"Could not find {mdfPath}.\n Trying alternate mdf names...")
 			mdfPath = f"{fileRoot}_v00.mdf2{mdfVersion}"
-		if not os.path.isfile(mdfPath):
-			print(f"Could not find {mdfPath}.\n Trying alternate mdf names...")
-			mdfPath = f"{fileRoot}_A.mdf2{mdfVersion}"	
+		for suffix in ("_A", "_a"):
+			if not os.path.isfile(mdfPath):
+				print(f"Could not find {mdfPath}.\n Trying alternate mdf names...")
+				mdfPath = f"{fileRoot}{suffix}.mdf2{mdfVersion}"	
 		
 		if gameName == "RE9" and not os.path.isfile(mdfPath):
 			mdfPath = f"{fileRoot}_00.mdf2{mdfVersion}"

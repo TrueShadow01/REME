@@ -592,8 +592,6 @@ def importMesh(
             sk = meshObj.shape_key_add(name=name)
             sk.interpolation = "KEY_LINEAR"
             sk.value = 0.0  # Default to the rest basis so the mesh isn't shown as a morph mix
-            print(f"mesh vertices: {len(meshObj.data.vertices)}")
-            print(f"delta vertices: {len(deltas)}")
             # Wilds blend regions are partial: a shape's deltas cover only the morphable vertex span
             # (submesh-relative, starting at vertex 0), not the whole submesh. Apply what we have and
             # leave the rest at the basis, rather than discarding everything on a length mismatch.
