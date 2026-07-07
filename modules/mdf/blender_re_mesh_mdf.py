@@ -232,6 +232,28 @@ MiscMapTypes = set([
 	#"Detail_NRRH_B",
 	#"Detail_NRRH_A",
 	])
+sf6DetailMaskTypeSet = set([
+	"Body_DetailBlendMask",
+	"Cloth_DetailMask",
+	"BodyMuscle_Mask"
+])
+
+sf6DetailNormalTypeSet = set([
+	"Body_UniqueDetail_NRRC",
+	"Body_DetailMapA",
+	"Body_DetailMapB",
+	"Body_DetailMapC",
+	"Body_DetailMapD",
+	"BodyMuscle_NormalA",
+	"BodyMuscle_NormalB",
+	"BodyMuscle_NormalC",
+	"BodyMuscle_NormalD",
+	"Cloth_DetailMapA",
+	"Cloth_DetailMapB",
+	"Cloth_DetailMapC",
+	"Cloth_DetailMapD",
+	"WrinkledMap",
+])
 
 usedTextureSet.update(albedoVertexColorTypeSet)
 usedTextureSet.update(normalVertexColorTypeSet)
@@ -246,6 +268,8 @@ usedTextureSet.update(OCTDTypes)
 usedTextureSet.update(SCOTTypes)
 usedTextureSet.update(NAMTypes)
 usedTextureSet.update(MiscMapTypes)
+usedTextureSet.update(sf6DetailMaskTypeSet)
+usedTextureSet.update(sf6DetailNormalTypeSet)
 
 #print(sorted(list(usedTextureSet)))
 baseUVTilingList = set([#Node types that use UV_Tiling property
@@ -546,6 +570,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if "_ALB" in texture:
 						autoDetectedAlbedo = True
 						detectedAlbedo = True
+				if gameName == "SF6" and textureType not in usedTextureSet and not autoDetectedAlbedo:
+					print(f"[SF6 MDF] skipped texture binding: material={materialName}, type={textureType}, path={texture}")
 				if loadUnusedTextures or textureType in usedTextureSet or autoDetectedAlbedo:
 					baseTexturePath = texture.replace("@","").replace(".tex","").replace('/',os.sep)
 					outputPath = os.path.join(TEXTURE_CACHE_DIR,baseTexturePath+".png")
@@ -625,7 +651,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					elif textureType in SCOTTypes:
 						textureNodeInfoList.append(("SCOT",textureType,imageList,outputPath))
 						
-					
+					elif gameName == "SF6" and textureType in sf6DetailMaskTypeSet:
+						textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
+					elif gameName == "SF6" and textureType in sf6DetailNormalTypeSet:
+						textureNodeInfoList.append(("NRRT",textureType,imageList,outputPath))
+
 					elif autoDetectedAlbedo:
 						textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
 					
