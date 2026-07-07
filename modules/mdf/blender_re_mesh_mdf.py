@@ -503,9 +503,55 @@ def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 	return inputPath	
 	
 
+def findSF6CMDUserPath(meshPath, cmdIndex=0):
+	if meshPath == None or ".mesh" not in meshPath:
+		return None
+	
+	meshRoot = meshPath.split(".mesh", 1)[0]
+	meshDir = os.path.dirname(meshRoot)
+	cmdDir = os.path.dirname(meshDir)
 
+	characterName = os.path.basename(os.path.dirname(cmdDir))
+	costumeName = os.path.basename(cmdDir)
+	cmdBaseName = f"{characterName}_{costumeName}_cmd_{str(cmdIndex).zfill(3)}.user.2"
+	cmdPath = os.path.join(cmdDir, cmdBaseName)
 
-def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False):
+	if os.path.isfile(cmdPath):
+		return cmdPath
+	
+	return None
+
+def debugSF6CMDUserColors(cmdPath, maxCount=80):
+	if cmdPath == None or not os.path.isfile(cmdPath):
+		return
+	
+	with open(cmdPath, "rb") as file:
+		data = file.read()
+	
+	print("[SF6 CMD] Candidate color values:")
+	count = 0
+
+	for offset in range(0, len(data) - 12, 4):
+		enabled = int.from_bytes(data[offset:offset + 4], "little")
+		r = data[offset + 4]
+		g = data[offset + 5]
+		b = data[offset + 6]
+		a = data[offset + 7]
+		nextValue = int.from_bytes(data[offset + 8:offset + 12], "little")
+
+		if enabled == 1 and a == 255 and nextValue < 1000:
+			print(
+				f"[SF6 CMD] offset=0x{offset + 4:06X} "
+				f"rgba8=({r},{g},{b},{a}) "
+				f"rgba=({r / 255.0:.3f},{g / 255.0:.3f},{b / 255.0:.3f},{a / 255.0:.3f}) "
+				f"next={nextValue}"
+			)
+			count += 1
+
+			if count >= maxCount:
+				break
+
+def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=0):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
 	USE_DDS = bpy.context.preferences.addons[ADDON_NAME].preferences.useDDS == True and bpy.app.version >= (4,2,0)
 	
@@ -521,6 +567,15 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 	#if not os.path.isdir(chunkPath):
 		#raiseWarning("Natives path not found, can't import textures")
 		#raise Exception
+
+	sf6CMDUserPath = None
+	if gameName == "SF6":
+		sf6CMDUserPath = findSF6CMDUserPath(meshPath, sf6CmdIndex)
+		if sf6CMDUserPath != None:
+			print(f"[SF6 CMD] Using {sf6CMDUserPath}")
+			debugSF6CMDUserColors(sf6CMDUserPath)
+		else:
+			print(f"[SF6 CMD] No cmd user file found.")
 	
 	chunkPathList = [chunkPath]
 	chunkPathList.extend(getChunkPathList(gameName))
@@ -638,6 +693,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					elif textureType in cmmTypeSet:
 						textureNodeInfoList.append(("CMM",textureType,imageList,outputPath))
 					elif textureType in cmaskTypeSet:
+						if gameName == "SF6":
+							print(f"[SF6 CMASK] material={materialName}, type={textureType}, path={texture}, output={outputPath}")
 						textureNodeInfoList.append(("CMASK",textureType,imageList,outputPath))
 					elif textureType in emissionTypeSet:
 						textureNodeInfoList.append(("EMI",textureType,imageList,outputPath))
@@ -728,6 +785,51 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				"gameName":gameName,
 				}
 			#print(gameName)
+			if gameName == "SF6":
+				for propName in sorted(matInfo["mPropDict"].keys()):
+					if propName.startswith("CustomizeColor_"):
+						propIndex = propName.replace("CustomizeColor_", "", 1)
+						if propIndex.isdigit():
+							print(f"[SF6 MDF PROP] material={materialName}, prop={propName}, value={matInfo['mPropDict'][propName].propValue}")
+
+			if gameName == "SF6":
+				sf6TestColors = None
+
+				if materialName in ("esf_ClothA_DressFront", "esf_ClothA_DressBack", "esf_ClothA_DressFrontSholder"):
+					sf6TestColors = {
+						"CustomizeColor_0": [186 / 255.0, 183 / 255.0, 159 / 255.0, 1.0],
+						"CustomizeColor_1": [157 / 255.0, 147 / 255.0, 53 / 255.0, 1.0],
+						"CustomizeColor_2": [109 / 255.0, 105 / 255.0, 68 / 255.0, 1.0],
+						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
+					}
+				elif materialName in ("esf_ClothB_Bracelet", "esf_ClothB_Earings", "esf_ClothB_Ribbon"):
+					sf6TestColors = {
+						"CustomizeColor_0": [219 / 255.0, 209 / 255.0, 124 / 255.0, 1.0],
+						"CustomizeColor_1": [244 / 255.0, 244 / 255.0, 143 / 255.0, 1.0],
+						"CustomizeColor_2": [25 / 255.0, 25 / 255.0, 25 / 255.0, 1.0],
+						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
+					}
+				elif materialName == "esf_ClothB_Shoses":
+					sf6TestColors  = {
+						"CustomizeColor_0": [187 / 255.0, 187 / 255.0, 187 / 255.0, 1.0],
+						"CustomizeColor_1": [219 / 255.0, 209 / 255.0, 124 / 255.0, 1.0],
+						"CustomizeColor_2": [187 / 255.0, 187 / 255.0, 187 / 255.0, 1.0],
+						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
+					}
+				elif materialName == "esf_ClothB_Pants":
+					sf6TestColors  = {
+						"CustomizeColor_0": [1.0, 1.0, 1.0, 1.0],
+						"CustomizeColor_1": [1.0, 1.0, 1.0, 1.0],
+						"CustomizeColor_2": [1.0, 1.0, 1.0, 1.0],
+						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
+					}
+
+				if sf6TestColors != None:
+					for propName, propValue in sf6TestColors.items():
+						if propName in matInfo["mPropDict"]:
+							matInfo["mPropDict"][propName].propValue = propValue
+							print(f"[SF6 CMD TEST] material={materialName}, prop={propName}, value={propValue}")
+
 			nodes = blenderMaterial.node_tree.nodes
 			links = blenderMaterial.node_tree.links
 			nodeTree = blenderMaterial.node_tree
