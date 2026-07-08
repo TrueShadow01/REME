@@ -545,8 +545,16 @@ def debugSF6CMDUserColors(cmdPath, maxCount=120):
 				if nextValue != 9:
 					continue
 				started = True
+				print("[SF6 CMD] Parsed color values:")
 			
+			colorIndex = len(colorList)
 			colorList.append((r, g, b))
+			print(
+				f"[SF6 CMD] slot={colorIndex} "
+				f"offset=0x{offset + 4:06X} "
+				f"rgba8=({r / 255.0:.3f},{g / 255.0:.3f},{b / 255.0:.3f},{a / 255.0:.3f}) "
+				f"next={nextValue}"
+			)
 
 			if nextValue == 996 or len(colorList) >= maxCount:
 				break
@@ -562,6 +570,8 @@ def getSF6CMDUserColorList(cmdPath, maxCount=120):
 	with open(cmdPath, "rb") as file:
 		data = file.read()
 	
+	started = False
+
 	for offset in range(0, len(data) - 12, 4):
 		enabled = int.from_bytes(data[offset:offset + 4], "little")
 		r = data[offset + 4]
@@ -571,8 +581,14 @@ def getSF6CMDUserColorList(cmdPath, maxCount=120):
 		nextValue = int.from_bytes(data[offset + 8:offset + 12], "little")
 
 		if enabled == 1 and a == 255 and nextValue < 1000:
+			if not started:
+				if nextValue != 9:
+					continue
+				started = True
+			
 			colorList.append((r, g, b))
-			if len(colorList) >= maxCount:
+
+			if nextValue == 996 or len(colorList) >= maxCount:
 				break
 	
 	return colorList
