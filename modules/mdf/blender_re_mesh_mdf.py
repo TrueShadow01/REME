@@ -552,7 +552,8 @@ def debugSF6CMDUserColors(cmdPath, maxCount=120):
 			print(
 				f"[SF6 CMD] slot={colorIndex} "
 				f"offset=0x{offset + 4:06X} "
-				f"rgba8=({r / 255.0:.3f},{g / 255.0:.3f},{b / 255.0:.3f},{a / 255.0:.3f}) "
+				f"rgba8=({r},{g},{b},{a})"
+				f"rgba=({r / 255.0:.3f},{g / 255.0:.3f},{b / 255.0:.3f},{a / 255.0:.3f}) "
 				f"next={nextValue}"
 			)
 
