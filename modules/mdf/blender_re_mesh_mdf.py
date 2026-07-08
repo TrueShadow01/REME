@@ -551,6 +551,32 @@ def debugSF6CMDUserColors(cmdPath, maxCount=80):
 			if count >= maxCount:
 				break
 
+def sf6Color(r, g, b, a=255):
+	return [r / 255.0, g / 255.0, b / 255.0, a / 255.0]
+
+def sf6ColorSet(c0=None, c1=None, c2=None, c3=None):
+	return {
+		"CustomizeColor_0": sf6Color(*c0) if c0 != None else [1.0, 1.0, 1.0, 1.0],
+		"CustomizeColor_1": sf6Color(*c1) if c1 != None else [1.0, 1.0, 1.0, 1.0],
+		"CustomizeColor_2": sf6Color(*c2) if c2 != None else [1.0, 1.0, 1.0, 1.0],
+		"CustomizeColor_3": sf6Color(*c3) if c3 != None else [1.0, 1.0, 1.0, 1.0],
+	}
+
+def getSF6TestMaterialColorMap(materialName):
+	if materialName in ("esf_ClothA_DressFront", "esf_ClothA_DressBack", "esf_ClothA_DressFrontSholder"):
+		return sf6ColorSet((186, 183, 159), (157, 147, 53), (109, 105, 68))
+	
+	if materialName in ("esf_ClothB_Bracelet", "esf_ClothB_Earings", "esf_ClothB_Ribbon"):
+		return sf6ColorSet((219, 209, 124), (244, 244, 143), (25, 25, 25))
+	
+	if materialName == "esf_ClothB_Shoses":
+		return sf6ColorSet((187, 187, 187), (219, 209, 124), (187, 187, 187))
+	
+	if materialName == "esf_ClothB_Pants":
+		return sf6ColorSet()
+	
+	return None
+
 def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=0):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
 	USE_DDS = bpy.context.preferences.addons[ADDON_NAME].preferences.useDDS == True and bpy.app.version >= (4,2,0)
@@ -785,44 +811,15 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				"gameName":gameName,
 				}
 			#print(gameName)
-			if gameName == "SF6":
-				for propName in sorted(matInfo["mPropDict"].keys()):
-					if propName.startswith("CustomizeColor_"):
-						propIndex = propName.replace("CustomizeColor_", "", 1)
-						if propIndex.isdigit():
-							print(f"[SF6 MDF PROP] material={materialName}, prop={propName}, value={matInfo['mPropDict'][propName].propValue}")
+			#if gameName == "SF6":
+			#	for propName in sorted(matInfo["mPropDict"].keys()):
+			#		if propName.startswith("CustomizeColor_"):
+			#			propIndex = propName.replace("CustomizeColor_", "", 1)
+			#			if propIndex.isdigit():
+			#				print(f"[SF6 MDF PROP] material={materialName}, prop={propName}, value={matInfo['mPropDict'][propName].propValue}")
 
 			if gameName == "SF6":
-				sf6TestColors = None
-
-				if materialName in ("esf_ClothA_DressFront", "esf_ClothA_DressBack", "esf_ClothA_DressFrontSholder"):
-					sf6TestColors = {
-						"CustomizeColor_0": [186 / 255.0, 183 / 255.0, 159 / 255.0, 1.0],
-						"CustomizeColor_1": [157 / 255.0, 147 / 255.0, 53 / 255.0, 1.0],
-						"CustomizeColor_2": [109 / 255.0, 105 / 255.0, 68 / 255.0, 1.0],
-						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
-					}
-				elif materialName in ("esf_ClothB_Bracelet", "esf_ClothB_Earings", "esf_ClothB_Ribbon"):
-					sf6TestColors = {
-						"CustomizeColor_0": [219 / 255.0, 209 / 255.0, 124 / 255.0, 1.0],
-						"CustomizeColor_1": [244 / 255.0, 244 / 255.0, 143 / 255.0, 1.0],
-						"CustomizeColor_2": [25 / 255.0, 25 / 255.0, 25 / 255.0, 1.0],
-						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
-					}
-				elif materialName == "esf_ClothB_Shoses":
-					sf6TestColors  = {
-						"CustomizeColor_0": [187 / 255.0, 187 / 255.0, 187 / 255.0, 1.0],
-						"CustomizeColor_1": [219 / 255.0, 209 / 255.0, 124 / 255.0, 1.0],
-						"CustomizeColor_2": [187 / 255.0, 187 / 255.0, 187 / 255.0, 1.0],
-						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
-					}
-				elif materialName == "esf_ClothB_Pants":
-					sf6TestColors  = {
-						"CustomizeColor_0": [1.0, 1.0, 1.0, 1.0],
-						"CustomizeColor_1": [1.0, 1.0, 1.0, 1.0],
-						"CustomizeColor_2": [1.0, 1.0, 1.0, 1.0],
-						"CustomizeColor_3": [1.0, 1.0, 1.0, 1.0],
-					}
+				sf6TestColors = getSF6TestMaterialColorMap(materialName)
 
 				if sf6TestColors != None:
 					for propName, propValue in sf6TestColors.items():
