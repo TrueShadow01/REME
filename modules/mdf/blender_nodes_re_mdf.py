@@ -1224,26 +1224,27 @@ def newCMASKNode (nodeTree,textureType,matInfo):
 			if prop.propValue == [0.501960813999176, 0.501960813999176, 0.501960813999176, 1.0]:
 				prop.propValue = [1.0,1.0,1.0,1.0]
 	if "CustomizeColor_0" in matInfo["mPropDict"]:
+		cmaskColorMixtype = "MIX" if matInfo["gameName"] == "SF6" else "MULTIPLY"
 		if "CustomizeColor_0" not in nodeTree.nodes:
 			color0Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_0"], matInfo["currentPropPos"], nodeTree)
 			color1Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_1"], matInfo["currentPropPos"], nodeTree)
 			color2Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_2"], matInfo["currentPropPos"], nodeTree)
 			color3Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_3"], matInfo["currentPropPos"], nodeTree)
 			
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color0Node.outputs["Color"],CMaskSeparateNode.outputs["Red"],mixType = "MULTIPLY")
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color1Node.outputs["Color"],CMaskSeparateNode.outputs["Green"],mixType = "MULTIPLY")
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color2Node.outputs["Color"],CMaskSeparateNode.outputs["Blue"],mixType = "MULTIPLY")
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color3Node.outputs["Color"],imageNode.outputs["Alpha"],mixType = "MULTIPLY")
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color0Node.outputs["Color"],CMaskSeparateNode.outputs["Red"],mixType = cmaskColorMixtype)
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color1Node.outputs["Color"],CMaskSeparateNode.outputs["Green"],mixType = cmaskColorMixtype)
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color2Node.outputs["Color"],CMaskSeparateNode.outputs["Blue"],mixType = cmaskColorMixtype)
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color3Node.outputs["Color"],imageNode.outputs["Alpha"],mixType = cmaskColorMixtype)
 		else:#Is cmask2
 			color4Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_4"], matInfo["currentPropPos"], nodeTree)
 			color5Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_5"], matInfo["currentPropPos"], nodeTree)
 			color6Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_6"], matInfo["currentPropPos"], nodeTree)
 			color7Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_7"], matInfo["currentPropPos"], nodeTree)
 			
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color4Node.outputs["Color"],CMaskSeparateNode.outputs["Red"],mixType = "MULTIPLY")
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color5Node.outputs["Color"],CMaskSeparateNode.outputs["Green"],mixType = "MULTIPLY")
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color6Node.outputs["Color"],CMaskSeparateNode.outputs["Blue"],mixType = "MULTIPLY")
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color7Node.outputs["Color"],imageNode.outputs["Alpha"],mixType = "MULTIPLY")
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color4Node.outputs["Color"],CMaskSeparateNode.outputs["Red"],mixType = cmaskColorMixtype)
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color5Node.outputs["Color"],CMaskSeparateNode.outputs["Green"],mixType = cmaskColorMixtype)
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color6Node.outputs["Color"],CMaskSeparateNode.outputs["Blue"],mixType = cmaskColorMixtype)
+			matInfo["albedoNodeLayerGroup"].addMixLayer(color7Node.outputs["Color"],imageNode.outputs["Alpha"],mixType = cmaskColorMixtype)
 	
 	if "CustomizeMetal_0" in matInfo["mPropDict"]:
 		if "CustomizeMetal_0" not in nodeTree.nodes:
