@@ -4,6 +4,7 @@ import bpy
 import re
 import traceback
 import glob
+import struct
 
 from mathutils import Vector
 from ..gen_functions import isLinux,resolveLinuxPath
@@ -522,45 +523,22 @@ def findSF6CMDUserPath(meshPath, cmdIndex=0):
 	return None
 
 def debugSF6CMDUserColors(cmdPath, maxCount=120):
-	colorList = []
+	colorList = getSF6CMDUserColorList(cmdPath, maxCount)
 
-	if cmdPath == None or not os.path.isfile(cmdPath):
+	if len(colorList) == 0:
 		return
 	
-	with open(cmdPath, "rb") as file:
-		data = file.read()
-	
-	started = False
-
-	for offset in range(0, len(data) - 12, 4):
-		enabled = int.from_bytes(data[offset:offset + 4], "little")
-		r = data[offset + 4]
-		g = data[offset + 5]
-		b = data[offset + 6]
-		a = data[offset + 7]
-		nextValue = int.from_bytes(data[offset + 8:offset + 12], "little")
-
-		if enabled == 1 and a == 255 and nextValue < 1000:
-			if not started:
-				if nextValue != 9:
-					continue
-				started = True
-				print("[SF6 CMD] Parsed color values:")
-			
-			colorIndex = len(colorList)
-			colorList.append((r, g, b))
-			print(
-				f"[SF6 CMD] slot={colorIndex} "
-				f"offset=0x{offset + 4:06X} "
-				f"rgba8=({r},{g},{b},{a})"
-				f"rgba=({r / 255.0:.3f},{g / 255.0:.3f},{b / 255.0:.3f},{a / 255.0:.3f}) "
-				f"next={nextValue}"
-			)
-
-			if nextValue == 996 or len(colorList) >= maxCount:
-				break
-		
-	return colorList
+	print("[SF6 CMD] Parsed color values:")
+	for colorRecord in colorList:
+		r, g, b, a = colorRecord["color"]
+		print(
+			f"[SF6 CMD] slot={colorRecord['slot']} "
+			f"offset=0x{colorRecord['offset']:06X} "
+			f"rgba8=({r}, {g}, {b}, {a}) "
+			f"rgba=({r / 255.0:.3f},{g / 255.0:.3f},{b / 255.0:.3f},{a / 255.0:.3f}) "
+			f"next={colorRecord['next']} "
+			f"adjustments={colorRecord['adjustments']}"
+		)
 
 def getSF6CMDUserColorList(cmdPath, maxCount=120):
 	colorList = []
@@ -573,7 +551,7 @@ def getSF6CMDUserColorList(cmdPath, maxCount=120):
 	
 	started = False
 
-	for offset in range(0, len(data) - 12, 4):
+	for offset in range(0, len(data) - 40, 4):
 		enabled = int.from_bytes(data[offset:offset + 4], "little")
 		r = data[offset + 4]
 		g = data[offset + 5]
@@ -587,33 +565,64 @@ def getSF6CMDUserColorList(cmdPath, maxCount=120):
 					continue
 				started = True
 			
-			colorList.append((r, g, b))
+			colorRecord = {
+				"slot": len(colorList),
+				"offset": offset + 4,
+				"color": (r, g, b, a),
+				"next": nextValue,
+				"adjustments" : [
+					(
+						int.from_bytes(data[offset + 12:offset + 16], "little"),
+						struct.unpack("<f", data[offset + 16:offset + 20])[0]
+					),
+					(
+						int.from_bytes(data[offset + 20:offset + 24], "little"),
+						struct.unpack("<f", data[offset + 24:offset + 28])[0]
+					),
+					(
+						int.from_bytes(data[offset + 28:offset + 32], "little"),
+						struct.unpack("<f", data[offset + 32:offset + 36])[0]
+					),
+				],
+			}
+			colorList.append(colorRecord)
 
 			if nextValue == 996 or len(colorList) >= maxCount:
 				break
 	
 	return colorList
 
-def sf6Color(r, g, b, a=255):
+def sf6Color(colorRecord):
+	r, g, b, a = colorRecord["color"]
+
+	# TODO: apply SF6 CMD adjustment floats here
+	# colorRecord["adjustments"] is [(enabled, value), (enabled, value), (enabled, value)]
 	return [r / 255.0, g / 255.0, b / 255.0, a / 255.0]
 
 def sf6ColorSet(c0=None, c1=None, c2=None, c3=None):
 	return {
-		"CustomizeColor_0": sf6Color(*c0) if c0 != None else [1.0, 1.0, 1.0, 1.0],
-		"CustomizeColor_1": sf6Color(*c1) if c1 != None else [1.0, 1.0, 1.0, 1.0],
-		"CustomizeColor_2": sf6Color(*c2) if c2 != None else [1.0, 1.0, 1.0, 1.0],
-		"CustomizeColor_3": sf6Color(*c3) if c3 != None else [1.0, 1.0, 1.0, 1.0],
+		"CustomizeColor_0": sf6Color(c0) if c0 != None else [1.0, 1.0, 1.0, 1.0],
+		"CustomizeColor_1": sf6Color(c1) if c1 != None else [1.0, 1.0, 1.0, 1.0],
+		"CustomizeColor_2": sf6Color(c2) if c2 != None else [1.0, 1.0, 1.0, 1.0],
+		"CustomizeColor_3": sf6Color(c3) if c3 != None else [1.0, 1.0, 1.0, 1.0],
 	}
 
 def sf6CMDColor(colorList, index, fallback):
 	if len(colorList) > index:
 		return colorList[index]
-	return fallback
+	return {
+		"slot": -1,
+		"offset": 0,
+		"color": (fallback[0], fallback[1], fallback[2], 255),
+		"next": -1,
+		"adjustments": [],
+	}
 
 SF6_CMD_MATERIAL_SLOT_MAP = {
 	("esf_ClothA_DressFront", "esf_ClothA_DressBack", "esf_ClothA_DressFrontSholder"): (0, 1, 2, None),
 	("esf_ClothB_Bracelet", "esf_ClothB_Earings", "esf_ClothB_Ribbon"): (12, 13, 14, None),
 	("esf_ClothB_Shoses",): (16, 12, 16, None),
+	("esf_Body00",): (27, 30, None, None),
 	("esf_ClothB_Pants",): (None, None, None, None),
 }
 
@@ -654,7 +663,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		sf6CMDUserPath = findSF6CMDUserPath(meshPath, sf6CmdIndex)
 		if sf6CMDUserPath != None:
 			print(f"[SF6 CMD] Using {sf6CMDUserPath}")
-			#debugSF6CMDUserColors(sf6CMDUserPath)
+			debugSF6CMDUserColors(sf6CMDUserPath)
 			sf6CMDColorList = getSF6CMDUserColorList(sf6CMDUserPath)
 		else:
 			print(f"[SF6 CMD] No cmd user file found.")
