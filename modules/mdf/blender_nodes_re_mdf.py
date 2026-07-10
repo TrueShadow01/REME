@@ -1261,20 +1261,20 @@ def newCMASKNode (nodeTree,textureType,matInfo):
 			color2Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_2"], matInfo["currentPropPos"], nodeTree)
 			color3Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_3"], matInfo["currentPropPos"], nodeTree)
 			
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color0Node.outputs["Color"],CMaskSeparateNode.outputs["Red"], 0)
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color1Node.outputs["Color"],CMaskSeparateNode.outputs["Green"], 1)
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color2Node.outputs["Color"],CMaskSeparateNode.outputs["Blue"], 2)
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color3Node.outputs["Color"],imageNode.outputs["Alpha"], 3)
+			addCMASKColorLayer(nodeTree, matInfo, color0Node, CMaskSeparateNode.outputs["Red"], 0)
+			addCMASKColorLayer(nodeTree, matInfo, color1Node, CMaskSeparateNode.outputs["Green"], 1)
+			addCMASKColorLayer(nodeTree, matInfo, color2Node, CMaskSeparateNode.outputs["Blue"], 2)
+			addCMASKColorLayer(nodeTree, matInfo, color3Node, imageNode.outputs["Alpha"], 3)
 		else:#Is cmask2
 			color4Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_4"], matInfo["currentPropPos"], nodeTree)
 			color5Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_5"], matInfo["currentPropPos"], nodeTree)
 			color6Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_6"], matInfo["currentPropPos"], nodeTree)
 			color7Node = addPropertyNode(matInfo["mPropDict"]["CustomizeColor_7"], matInfo["currentPropPos"], nodeTree)
 			
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color4Node.outputs["Color"],CMaskSeparateNode.outputs["Red"], 4)
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color5Node.outputs["Color"],CMaskSeparateNode.outputs["Green"], 5)
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color6Node.outputs["Color"],CMaskSeparateNode.outputs["Blue"], 6)
-			matInfo["albedoNodeLayerGroup"].addMixLayer(color7Node.outputs["Color"],imageNode.outputs["Alpha"], 7)
+			addCMASKColorLayer(nodeTree, matInfo, color4Node, CMaskSeparateNode.outputs["Red"], 4)
+			addCMASKColorLayer(nodeTree, matInfo, color5Node, CMaskSeparateNode.outputs["Green"], 5)
+			addCMASKColorLayer(nodeTree, matInfo, color6Node, CMaskSeparateNode.outputs["Blue"], 6)
+			addCMASKColorLayer(nodeTree, matInfo, color7Node, imageNode.outputs["Alpha"], 7)
 	
 	cmaskValueMixType = "ADD" if matInfo["gameName"] == "SF6" else "MULTIPLY"
 	if "CustomizeMetal_0" in matInfo["mPropDict"]:
