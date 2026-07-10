@@ -522,13 +522,13 @@ def findSF6CMDUserPath(meshPath, cmdIndex=0):
 	
 	return None
 
-SF6_CMD_TYPES = {
+SF6_CMD_TYPES = (
 	0xF3356698, # BlendRate
 	0x982FBF08, # Roughness
 	0x2C5538DD, # Metalness
 	0xAC2691C9, # ColorOption
 	0x123A0E06, # CustomizeColorData
-}
+)
 
 def getSF6CMDMaterialMap(cmdPath):
 	materialMap = {}
@@ -570,7 +570,7 @@ def getSF6CMDMaterialMap(cmdPath):
 			continue
 		if refs != tuple(range(blendRef, blendRef + 5)):
 			continue
-		if tuple(instanceTypes[ref] for ref in refs != SF6_CMD_TYPES):
+		if tuple(instanceTypes[ref] for ref in refs) != SF6_CMD_TYPES:
 			continue
 
 		flags = (u32(offset), u32(offset + 8), u32(offset + 16), u32(offset + 36))
@@ -611,7 +611,7 @@ def getSF6CMDMaterialMap(cmdPath):
 			
 	print(
 		f"[SF6 CMD] Parsed {len(materialMap)} material clusters, "
-		f"{len(colorRecords)} customzie colors."
+		f"{len(colorRecords)} customize colors."
 	)
 	return materialMap
 
@@ -625,16 +625,16 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 				r / 255.0, g / 255.0, b / 255.0, a / 255.0
 			]
 
-			optionProps = (
-				("blendRate", f"CustomizeColor_{index}_BlendRate"),
-				("roughness", f"CustomizeRoughness_{index}"),
-				("metalness", f"CustomizeMetal_{index}"),
-			)
+		optionProps = (
+			("blendRate", f"CustomizeColor_{index}_BlendRate"),
+			("roughness", f"CustomizeRoughness_{index}"),
+			("metalness", f"CustomizeMetal_{index}"),
+		)
 
-			for recordKey, propName in optionProps:
-				enabled, value = record[recordKey]
-				if enabled and propName in propDict:
-					propDict[propName].propValue = [value]
+		for recordKey, propName in optionProps:
+			enabled, value = record[recordKey]
+			if enabled and propName in propDict:
+				propDict[propName].propValue = [value]
 
 def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=0):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
@@ -654,7 +654,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		#raise Exception
 
 	sf6CMDUserPath = None
-	sf6CMDMaterialMap = []
+	sf6CMDMaterialMap = {}
 
 	if gameName == "SF6":
 		sf6CMDUserPath = findSF6CMDUserPath(meshPath, sf6CmdIndex)
