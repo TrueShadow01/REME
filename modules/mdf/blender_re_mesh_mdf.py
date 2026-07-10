@@ -522,123 +522,119 @@ def findSF6CMDUserPath(meshPath, cmdIndex=0):
 	
 	return None
 
-def debugSF6CMDUserColors(cmdPath, maxCount=120):
-	colorList = getSF6CMDUserColorList(cmdPath, maxCount)
+SF6_CMD_TYPES = {
+	0xF3356698, # BlendRate
+	0x982FBF08, # Roughness
+	0x2C5538DD, # Metalness
+	0xAC2691C9, # ColorOption
+	0x123A0E06, # CustomizeColorData
+}
 
-	if len(colorList) == 0:
-		return
-	
-	print("[SF6 CMD] Parsed color values:")
-	for colorRecord in colorList:
-		r, g, b, a = colorRecord["color"]
-		print(
-			f"[SF6 CMD] slot={colorRecord['slot']} "
-			f"offset=0x{colorRecord['offset']:06X} "
-			f"rgba8=({r}, {g}, {b}, {a}) "
-			f"rgba=({r / 255.0:.3f},{g / 255.0:.3f},{b / 255.0:.3f},{a / 255.0:.3f}) "
-			f"next={colorRecord['next']} "
-			f"adjustments={colorRecord['adjustments']}"
-		)
-
-def getSF6CMDUserColorList(cmdPath, maxCount=120):
-	colorList = []
+def getSF6CMDMaterialMap(cmdPath):
+	materialMap = {}
 
 	if cmdPath == None or not os.path.isfile(cmdPath):
-		return colorList
+		return materialMap
 	
 	with open(cmdPath, "rb") as file:
 		data = file.read()
 	
-	started = False
-
-	for offset in range(0, len(data) - 40, 4):
-		enabled = int.from_bytes(data[offset:offset + 4], "little")
-		r = data[offset + 4]
-		g = data[offset + 5]
-		b = data[offset + 6]
-		a = data[offset + 7]
-		nextValue = int.from_bytes(data[offset + 8:offset + 12], "little")
-
-		if enabled == 1 and a == 255 and nextValue < 1000:
-			if not started:
-				if nextValue != 9:
-					continue
-				started = True
-			
-			colorRecord = {
-				"slot": len(colorList),
-				"offset": offset + 4,
-				"color": (r, g, b, a),
-				"next": nextValue,
-				"adjustments" : [
-					(
-						int.from_bytes(data[offset + 12:offset + 16], "little"),
-						struct.unpack("<f", data[offset + 16:offset + 20])[0]
-					),
-					(
-						int.from_bytes(data[offset + 20:offset + 24], "little"),
-						struct.unpack("<f", data[offset + 24:offset + 28])[0]
-					),
-					(
-						int.from_bytes(data[offset + 28:offset + 32], "little"),
-						struct.unpack("<f", data[offset + 32:offset + 36])[0]
-					),
-				],
-			}
-			colorList.append(colorRecord)
-
-			if nextValue == 996 or len(colorList) >= maxCount:
-				break
+	rszBase = data.find(b"RSZ\x00")
+	if data[:4] != b"USR\x00" or rszBase == -1:
+		return materialMap
 	
-	return colorList
+	u32 = lambda offset: struct.unpack_from("<I", data, offset)[0]
+	u64 = lambda offset: struct.unpack_from("<Q", data, offset)[0]
+	f32 = lambda offset: struct.unpack_from("<f", data, offset)[0]
 
-def sf6Color(colorRecord):
-	r, g, b, a = colorRecord["color"]
+	instanceCount = u32(rszBase + 0x0C)
+	instanceInfoOffset = rszBase + u64(rszBase + 0x18)
+	dataOffset = rszBase + u64(rszBase + 0x20)
 
-	# TODO: apply SF6 CMD adjustment floats here
-	# colorRecord["adjustments"] is [(enabled, value), (enabled, value), (enabled, value)]
-	return [r / 255.0, g / 255.0, b / 255.0, a / 255.0]
+	instanceTypes = [
+		u32(instanceInfoOffset + index * 8)
+		for index in range(instanceCount)
+	]
 
-def sf6ColorSet(c0=None, c1=None, c2=None, c3=None):
-	return {
-		"CustomizeColor_0": sf6Color(c0) if c0 != None else [1.0, 1.0, 1.0, 1.0],
-		"CustomizeColor_1": sf6Color(c1) if c1 != None else [1.0, 1.0, 1.0, 1.0],
-		"CustomizeColor_2": sf6Color(c2) if c2 != None else [1.0, 1.0, 1.0, 1.0],
-		"CustomizeColor_3": sf6Color(c3) if c3 != None else [1.0, 1.0, 1.0, 1.0],
-	}
+	colorRecords = {}
 
-def sf6CMDColor(colorList, index, fallback):
-	if len(colorList) > index:
-		return colorList[index]
-	return {
-		"slot": -1,
-		"offset": 0,
-		"color": (fallback[0], fallback[1], fallback[2], 255),
-		"next": -1,
-		"adjustments": [],
-	}
+	for offset in range(dataOffset, len(data) - 47, 4):
+		blendRef = u32(offset + 24)
+		roughRef = u32(offset + 28)
+		metalRef = u32(offset + 32)
+		optionRef = u32(offset + 44)
+		colorRef = optionRef + 1
 
-SF6_CMD_MATERIAL_SLOT_MAP = {
-	("esf_ClothA_DressFront", "esf_ClothA_DressBack", "esf_ClothA_DressFrontSholder"): (0, 1, 2, None),
-	("esf_ClothB_Bracelet", "esf_ClothB_Earings", "esf_ClothB_Ribbon"): (12, 13, 14, None),
-	("esf_ClothB_Shoses",): (16, 12, 16, None),
-	("esf_Body00",): (27, 30, None, None),
-	("esf_ClothB_Pants",): (None, None, None, None),
-}
+		refs = (blendRef, roughRef, metalRef, optionRef, colorRef)
+		if not all(0 < ref < instanceCount for ref in refs):
+			continue
+		if refs != tuple(range(blendRef, blendRef + 5)):
+			continue
+		if tuple(instanceTypes[ref] for ref in refs != SF6_CMD_TYPES):
+			continue
 
-def getSF6TestMaterialColorMap(materialName, colorList=None):
-	if colorList == None:
-		colorList = []
+		flags = (u32(offset), u32(offset + 8), u32(offset + 16), u32(offset + 36))
+		if not all(flag in (0, 1) for flag in flags):
+			continue
 
-	for materialNames, slots in SF6_CMD_MATERIAL_SLOT_MAP.items():
-		if materialName in materialNames:
-			colors = []
-			for slot in slots:
-				colors.append(sf6CMDColor(colorList, slot, (255, 255, 255)) if slot != None else None)
-			print(f"[SF6 CMD MAP] material={materialName}, slots={slots}, colors={colors}")
-			return sf6ColorSet(*colors)
+		colorRecords[colorRef] = {
+			"offset": offset,
+			"colorEnabled": flags[3],
+			"color": tuple(data[offset + 40:offset + 44]),
+			"blendRate": (flags[0], f32(offset + 4)),
+			"roughness": (flags[1], f32(offset + 12)),
+			"metalness": (flags[2], f32(offset + 20)),
+		}
 
-	return None
+	for lengthOffset in range(dataOffset, len(data) - 12, 4):
+		charCount = u32(lengthOffset)
+		if not 1 < charCount < 256:
+			continue
+
+		nameOffset = lengthOffset + 4
+		stringEnd = nameOffset + charCount * 2
+		arrayOffset = (stringEnd + 3) & ~3
+
+		if arrayOffset + 36 > len(data):
+			continue
+		if data[stringEnd - 2:stringEnd] != b"\x00\x00" or u32(arrayOffset) != 8:
+			continue
+	
+		try:
+			materialName = data[nameOffset:stringEnd - 2].decode("utf-16le")
+		except UnicodeDecodeError:
+			continue
+
+		colorRefs = [u32(arrayOffset + 4 + index * 4) for index in range(8)]
+		if all(ref in colorRecords for ref in colorRefs):
+			materialMap[materialName] = [colorRecords[ref] for ref in colorRefs]
+			
+	print(
+		f"[SF6 CMD] Parsed {len(materialMap)} material clusters, "
+		f"{len(colorRecords)} customzie colors."
+	)
+	return materialMap
+
+def applySF6CMDMaterial(materialName, materialMap, propDict):
+	for index, record in enumerate(materialMap.get(materialName, [])):
+		colorProp = f"CustomizeColor_{index}"
+
+		if record["colorEnabled"] and colorProp in propDict:
+			r, g, b, a = record["color"]
+			propDict[colorProp].propValue = [
+				r / 255.0, g / 255.0, b / 255.0, a / 255.0
+			]
+
+			optionProps = (
+				("blendRate", f"CustomizeColor_{index}_BlendRate"),
+				("roughness", f"CustomizeRoughness_{index}"),
+				("metalness", f"CustomizeMetal_{index}"),
+			)
+
+			for recordKey, propName in optionProps:
+				enabled, value = record[recordKey]
+				if enabled and propName in propDict:
+					propDict[propName].propValue = [value]
 
 def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=0):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
@@ -658,13 +654,13 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		#raise Exception
 
 	sf6CMDUserPath = None
-	sf6CMDColorList = []
+	sf6CMDMaterialMap = []
+
 	if gameName == "SF6":
 		sf6CMDUserPath = findSF6CMDUserPath(meshPath, sf6CmdIndex)
 		if sf6CMDUserPath != None:
 			print(f"[SF6 CMD] Using {sf6CMDUserPath}")
-			debugSF6CMDUserColors(sf6CMDUserPath)
-			sf6CMDColorList = getSF6CMDUserColorList(sf6CMDUserPath)
+			sf6CMDMaterialMap = getSF6CMDMaterialMap(sf6CMDUserPath)
 		else:
 			print(f"[SF6 CMD] No cmd user file found.")
 	
@@ -878,13 +874,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			#print(gameName)
 
 			if gameName == "SF6":
-				sf6TestColors = getSF6TestMaterialColorMap(materialName, sf6CMDColorList)
-
-				if sf6TestColors != None:
-					for propName, propValue in sf6TestColors.items():
-						if propName in matInfo["mPropDict"]:
-							matInfo["mPropDict"][propName].propValue = propValue
-							#print(f"[SF6 CMD TEST] material={materialName}, prop={propName}, value={propValue}")
+				applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"])
 
 			nodes = blenderMaterial.node_tree.nodes
 			links = blenderMaterial.node_tree.links
