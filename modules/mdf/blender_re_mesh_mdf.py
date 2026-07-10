@@ -607,7 +607,7 @@ def getSF6CMDMaterialMap(cmdPath):
 
 		if not materialName or not all(32 <= ord(char) <= 126 for char in materialName):
 			continue
-		
+
 		colorRefs = [u32(arrayOffset + 4 + index * 4) for index in range(8)]
 		if all(ref in colorRecords for ref in colorRefs):
 			materialMap[materialName] = [colorRecords[ref] for ref in colorRefs]
@@ -619,19 +619,25 @@ def getSF6CMDMaterialMap(cmdPath):
 	return materialMap
 
 def applySF6CMDMaterial(materialName, materialMap, propDict):
-	for index, record in enumerate(materialMap.get(materialName, [])):
-		colorProp = f"CustomizeColor_{index}"
+	colorIndexMap = (0, 1, 2, 3, 4, 5, 6, 7)
+
+	for recordIndex, record in enumerate(materialMap.get(materialName, [])):
+		colorIndex = colorIndexMap[recordIndex]
+		colorProp = f"CustomizeColor_{colorIndex}"
 
 		if record["colorEnabled"] and colorProp in propDict:
 			r, g, b, a = record["color"]
 			propDict[colorProp].propValue = [
-				r / 255.0, g / 255.0, b / 255.0, a / 255.0
+				r / 255.0,
+				g / 255.0,
+				b / 255.0,
+				a / 255.0,
 			]
 
 		optionProps = (
-			("blendRate", f"CustomizeColor_{index}_BlendRate"),
-			("roughness", f"CustomizeRoughness_{index}"),
-			("metalness", f"CustomizeMetal_{index}"),
+			("blendRate", f"CustomizeColor_{colorIndex}_BlendRate"),
+			("roughness", f"CustomizeRoughness_{colorIndex}"),
+			("metalness", f"CustomizeMetal_{colorIndex}"),
 		)
 
 		for recordKey, propName in optionProps:
@@ -799,9 +805,9 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						textureNodeInfoList.append(("SCOT",textureType,imageList,outputPath))
 						
 					elif gameName == "SF6" and textureType in sf6DetailMaskTypeSet:
-						textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
+						textureNodeInfoList.append(("UNKN",textureType,imageList,outputPath))
 					elif gameName == "SF6" and textureType in sf6DetailNormalTypeSet:
-						textureNodeInfoList.append(("NRRT",textureType,imageList,outputPath))
+						textureNodeInfoList.append(("UNKN",textureType,imageList,outputPath))
 
 					elif autoDetectedAlbedo:
 						textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))

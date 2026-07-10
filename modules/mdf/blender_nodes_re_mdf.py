@@ -1236,7 +1236,95 @@ def addCMASKColorLayer(nodeTree, matInfo, colorNode, maskSocket, colorIndex):
 		mixType="MULTIPLY",
 	)
 
+def newSF6MaskNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+	if matInfo.get("_sf6CMASKBuilt", False):
+		return imageNode
+	
+	whiteNode = nodeTree.nodes.new("ShaderNodeRGB")
+	whiteNode.name = "SF6 Customize Tint Base"
+	whiteNode.outputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
+	tintSocket = whiteNode.outputs["Color"]
+
+	switchProp = matInfo["mPropDict"].get("CustomizeColor_BlendSwitch")
+	blendSwitch = switchProp is not None and switchProp.propValue[0] != 0.0
+
+	for maskName, slotBase in (
+		("CustomizeColor_Mask", 0),
+		("CustomizeColor_Mask2", 4)
+	):
+		maskNode = matInfo["textureNodeDict"].get(maskName)
+		if maskNode is None:
+			continue
+
+		separateNode = nodeTree.nodes.new("ShaderNodeSeparateColor")
+		nodeTree.links.new(maskNode.outputs["Color"], separateNode.inputs["Color"])
+		maskSockets = (
+			separateNode.outputs["Red"],
+			separateNode.outputs["Green"],
+			separateNode.outputs["Blue"],
+			maskNode.outputs["Alpha"],
+		)
+
+		for channelIndex, maskSocket in enumerate(maskSockets):
+			colorIndex = slotBase + channelIndex
+			colorName = f"CustomizeColor_{colorIndex}"
+
+			if colorName in matInfo["mPropDict"]:
+				colorNode = addPropertyNode(
+					matInfo["mPropDict"][colorName],
+					matInfo["currentPropPos"],
+					nodeTree
+				)
+
+				scaleNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+				scaleNode.blend_type = "MULTIPLY"
+				scaleNode.inputs["Fac"].default_value = 1.0
+				scaleNode.inputs["Color2"].default_value = (2.0, 2.0, 2.0, 1.0)
+				nodeTree.links.new(colorNode.outputs["Color"], scaleNode.inputs["Color1"])
+
+				factorSocket = maskSocket
+				rateName = f"CustomizeColor_{colorIndex}_BlendRate"
+				if rateName in matInfo["mPropDict"]:
+					rateNode = addPropertyNode(
+						matInfo["mPropDict"][rateName],
+						matInfo["currentPropPos"],
+						nodeTree
+					)
+					factorNode = nodeTree.nodes.new("ShaderNodeMath")
+					factorNode.operation = "MULTIPLY"
+					nodeTree.links.new(maskSocket, factorNode.inputs[0])
+					nodeTree.links.new(rateNode.outputs["Value"], factorNode.inputs[1])
+					factorSocket = factorNode.outputs["Value"]
+
+				mixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+				mixNode.blend_type = "MULTIPLY" if blendSwitch else "MIX"
+				nodeTree.links.new(tintSocket, mixNode.inputs["Color1"])
+				nodeTree.links.new(scaleNode.outputs["Color"], mixNode.inputs["Color2"])
+				nodeTree.links.new(factorSocket, mixNode.inputs["Fac"])
+				tintSocket = mixNode.outputs["Color"]
+			
+			for prefix, layerGroup in (
+				("CustomizeRoughness", matInfo["roughnessNodeLayerGroup"]),
+				("CustomizeMetal", matInfo["metallicNodeLayerGroup"])
+			):
+				propName = f"{prefix}_{colorIndex}"
+				if propName in matInfo["mPropDict"]:
+					valueNode = addPropertyNode(
+						matInfo["mPropDict"][propName],
+						matInfo["currentPropPos"],
+						nodeTree
+					)
+					layerGroup.addMixLayer(valueNode.outputs["Value"], maskSocket, mixType="ADD")
+		
+	matInfo["albedoNodeLayerGroup"].addMixLayer(tintSocket, mixType="MULTIPLY", mixFactor=1.0)
+	matInfo["_sf6CMASKBuilt"] = True
+	return imageNode
+
 def newCMASKNode (nodeTree,textureType,matInfo):
+	if matInfo["gameName"] == "SF6":
+		return newSF6MaskNode(nodeTree, textureType, matInfo)
+	
 	imageNode = nodeTree.nodes[textureType]
 	currentPos = [imageNode.location[0]+300,imageNode.location[1]]	
 	
