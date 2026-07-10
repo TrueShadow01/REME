@@ -1315,7 +1315,16 @@ def newSF6MaskNode(nodeTree, textureType, matInfo):
 						matInfo["currentPropPos"],
 						nodeTree
 					)
-					layerGroup.addMixLayer(valueNode.outputs["Value"], maskSocket, mixType="ADD")
+
+					valueSocket = valueNode.outputs["Value"]
+					if prefix == "CustomizeMetal" and matInfo["isDielectric"]:
+						negateNode = nodeTree.nodes.new("ShaderNodeMath")
+						negateNode.operation = "MULTIPLY"
+						negateNode.inputs[1].default_value = -1.0
+						nodeTree.links.new(valueSocket, negateNode.inputs[0])
+						valueSocket = negateNode.outputs["Value"]
+
+					layerGroup.addMixLayer(valueSocket, maskSocket, mixType="ADD")
 		
 	matInfo["albedoNodeLayerGroup"].addMixLayer(tintSocket, mixType="MULTIPLY", mixFactor=1.0)
 	matInfo["_sf6CMASKBuilt"] = True
