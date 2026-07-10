@@ -605,6 +605,9 @@ def getSF6CMDMaterialMap(cmdPath):
 		except UnicodeDecodeError:
 			continue
 
+		if not materialName or not all(32 <= ord(char) <= 126 for char in materialName):
+			continue
+		
 		colorRefs = [u32(arrayOffset + 4 + index * 4) for index in range(8)]
 		if all(ref in colorRecords for ref in colorRefs):
 			materialMap[materialName] = [colorRecords[ref] for ref in colorRefs]
