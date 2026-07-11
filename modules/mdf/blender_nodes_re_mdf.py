@@ -1330,6 +1330,85 @@ def newSF6MaskNode(nodeTree, textureType, matInfo):
 	matInfo["_sf6CMASKBuilt"] = True
 	return imageNode
 
+def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if matInfo.get("_sf6ClothDetailBuilt", False):
+		return imageNode
+	
+	maskNode = matInfo["textureNodeDict"].get("Cloth_DetailMask")
+	if maskNode is None:
+		return imageNode
+	
+	separateMask = nodeTree.nodes.new("ShaderNodeSeparateColor")
+	separateMask.name = "SF6 Cloth Detail Mask Channels"
+	nodeTree.links.new(maskNode.outputs["Color"], separateMask.inputs["Color"])
+
+	maskSockets = (
+		separateMask.outputs["Red"],
+		separateMask.outputs["Green"],
+		separateMask.outputs["Blue"],
+		maskNode.outputs["Alpha"],
+	)
+
+	uvNode = nodeTree.nodes.get("UVMap1Node")
+	for index, letter in enumerate(("A", "B", "C", "D")):
+		detailNode = matInfo["textureNodeDict"].get(f"Cloth_DetailMap{letter}")
+		if detailNode is None:
+			continue
+
+		try:
+			detailNode.image.colorspace_settings.name = "Non-Color"
+		except Exception:
+			pass
+
+		tilingName = f"Cloth_Detail{letter}_TilingOffcets"
+		if uvNode is not None and tilingName in matInfo["mPropDict"]:
+			tilingNode = addPropertyNode(
+				matInfo["mPropDict"][tilingName],
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			scaleNode = nodeTree.nodes.new("ShaderNodeCombineXYZ")
+			locationNode = nodeTree.nodes.new("ShaderNodeCombineXYZ")
+			mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+
+			scaleNode.inputs["Z"].default_value = 1.0
+
+			nodeTree.links.new(tilingNode.outputs["X"], scaleNode.inputs["X"])
+			nodeTree.links.new(tilingNode.outputs["Y"], scaleNode.inputs["Y"])
+			nodeTree.links.new(tilingNode.outputs["Z"], locationNode.inputs["X"])
+			nodeTree.links.new(tilingNode.outputs["W"], locationNode.inputs["Y"])
+
+			nodeTree.links.new(uvNode.outputs["UV"], mappingNode.inputs["Vector"])
+			nodeTree.links.new(scaleNode.outputs["Vector"], mappingNode.inputs["Scale"])
+			nodeTree.links.new(locationNode.outputs["Vector"], mappingNode.inputs["Location"])
+			nodeTree.links.new(mappingNode.outputs["Vector"], detailNode.inputs["Vector"])
+
+		factorSocket = maskSockets[index]
+		rateName = f"Cloth_Detail{letter}_RoughnessBlendRate"
+
+		if rateName in matInfo["mPropDict"]:
+			rateNode = addPropertyNode(
+				matInfo["mPropDict"][rateName],
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			factorNode = nodeTree.nodes.new("ShaderNodeMath")
+			factorNode.operation = "MULTIPLY"
+			factorNode.use_clamp = True
+
+			nodeTree.links.new(maskSockets[index], factorNode.inputs[0])
+			nodeTree.links.new(rateNode.outputs["Value"], factorNode.inputs[1])
+			factorSocket = factorNode.outputs["Value"]
+
+		matInfo["roughnessNodeLayerGroup"].addMixLayer(detailNode.outputs["Alpha"], factorSocket, mixType="MIX")
+
+	matInfo["_sf6ClothDetailBuilt"] = True
+	return imageNode
+
 def newCMASKNode (nodeTree,textureType,matInfo):
 	if matInfo["gameName"] == "SF6":
 		return newSF6MaskNode(nodeTree, textureType, matInfo)
@@ -1667,7 +1746,7 @@ nodeDict = {
 	"SRM":newSRMNode,
 	"NRM":newNRMNode,
 	#"UNKN":newUNKNNode,
-	
+	"SF6DETAIL":newSF6ClothDetailNode,
 	}
 def addTextureNode(nodeTree,nodeType,textureType,matInfo):
 	#print(nodeType)
