@@ -1448,6 +1448,97 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 	matInfo["_sf6ClothDetailBuilt"] = True
 	return imageNode
 
+def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if matInfo.get("_sf6BodyDetailBuilt", False):
+		return imageNode
+
+	maskNode = matInfo["textureNodeDict"].get("Body_DetailBlendMask")
+	if maskNode is None:
+		return imageNode
+	
+	separateMask = nodeTree.nodes.new("ShaderNodeSeparateColor")
+	nodeTree.links.new(maskNode.outputs["Color"], separateMask.inputs["Color"])
+
+	maskSockets = {
+		separateMask.outputs["Red"],
+		separateMask.outputs["Green"],
+		separateMask.outputs["Blue"],
+		maskNode.outputs["Alpha"],
+	}
+
+	detailNormalSocket = None
+	uniqueNode = matInfo["textureNodeDict"].get("Body_UniqueDetail_NRRC")
+
+	if uniqueNode is not None:
+		uniqueNode.image.colorspace_settings.name = "Non-Color"
+
+		uniqueDecode = getBentNormalNodeGroup(nodeTree)
+		nodeTree.links.new(uniqueNode.outputs["Color"], uniqueDecode.inputs["Color"])
+		nodeTree.links.new(uniqueNode.outputs["Alpha"], uniqueDecode.inputs["Alpha"])
+
+		uniqueNormal = nodeTree.nodes.new("ShaderNodeNormalMap")
+		nodeTree.links.new(uniqueNode.outputs["Color"], uniqueNormal.inputs["Color"])
+
+		intensityProp = matInfo["mPropDict"].get("Body_UniqueDetail_NormalIntensity")
+		if intensityProp is not None:
+			uniqueNormal.inputs["Strength"].default_value = intensityProp.propValue[0]
+
+		detailNormalSocket = uniqueNormal.outputs["Normal"]
+	
+	uvNode = nodeTree.nodes.get("UVMap1Node")
+
+	for index, letter in enumerate(("A", "B", "C", "D")):
+		detailNode = matInfo["textureNodeDict"].get(f"Body_DetailMap{letter}")
+		if detailNode is None:
+			continue
+
+		detailNode.image.colorspace_settings.name = "Non-Color"
+
+		tilingProp = matInfo["mPropDict"].get(f"Body_DetailMap{letter}_Tiling")
+		if uvNode is not None and tilingProp is not None:
+			values = tilingProp.propValue
+			mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+			mappingNode.inputs["Scale"].default_value = (values[0], values[1], 1.0)
+			mappingNode.inputs["Location"].default_value = (values[2], values[3], 0.0)
+			nodeTree.links.new(uvNode.outputs["UV"], mappingNode.inputs["Vector"])
+			nodeTree.links.new(mappingNode.outputs["Vector"], detailNode.inputs["Vector"])
+		
+		decodeNode = getBentNormalNodeGroup(nodeTree)
+		nodeTree.links.new(detailNode.outputs["Color"], decodeNode.inputs["Color"])
+		nodeTree.links.new(detailNode.outputs["Alpha"], decodeNode.inputs["Alpha"])
+
+		normalNode = nodeTree.nodes.new("ShaderNodeNormalMap")
+		nodeTree.links.new(decodeNode.outputs["Color"], normalNode.inputs["Color"])
+
+		intensityProp = matInfo["mPropDict"].get(f"Body_DetailMap{letter}_NormalIntensity")
+		if intensityProp is not None:
+			normalNode.inputs["Strength"].default_value = intensityProp.propValue[0]
+		
+		if detailNormalSocket is None:
+			geometryNode = nodeTree.nodes.get("geometryNode")
+			if geometryNode is None:
+				geometryNode = nodeTree.nodes.new("ShaderNodeNewGeometry")
+				geometryNode.name = "geometryNode"
+			detailNormalSocket = geometryNode.outputs["Normal"]
+		
+		mixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		nodeTree.links.new(maskSockets[index], mixNode.inputs["Fac"])
+		nodeTree.links.new(detailNormalSocket, mixNode.inputs["Color1"])
+		nodeTree.links.new(normalNode.outputs["Normal"], mixNode.inputs["Color2"])
+
+		normalizeNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		normalizeNode.operation = "NORMALIZE"
+		nodeTree.links.new(mixNode.outputs["Color"], normalizeNode.inputs[0])
+		detailNormalSocket = normalizeNode.outputs["Vector"]
+	
+	if detailNormalSocket is not None:
+		matInfo["detailNormalSocket"] = detailNormalSocket
+	
+	matInfo["_sf6BodyDetailBuilt"] = True
+	return imageNode
+
 def newCMASKNode (nodeTree,textureType,matInfo):
 	if matInfo["gameName"] == "SF6":
 		return newSF6MaskNode(nodeTree, textureType, matInfo)
@@ -1786,6 +1877,7 @@ nodeDict = {
 	"NRM":newNRMNode,
 	#"UNKN":newUNKNNode,
 	"SF6DETAIL":newSF6ClothDetailNode,
+	"SF6BODYDETAIL": newSF6BodyDetailNode,
 	}
 def addTextureNode(nodeTree,nodeType,textureType,matInfo):
 	#print(nodeType)
