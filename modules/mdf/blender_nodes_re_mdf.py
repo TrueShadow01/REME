@@ -1352,6 +1352,8 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 	)
 
 	uvNode = nodeTree.nodes.get("UVMap1Node")
+	detailNormalSocket = None
+
 	for index, letter in enumerate(("A", "B", "C", "D")):
 		detailNode = matInfo["textureNodeDict"].get(f"Cloth_DetailMap{letter}")
 		if detailNode is None:
@@ -1386,6 +1388,40 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 			nodeTree.links.new(locationNode.outputs["Vector"], mappingNode.inputs["Location"])
 			nodeTree.links.new(mappingNode.outputs["Vector"], detailNode.inputs["Vector"])
 
+		decodeNode = getBentNormalNodeGroup(nodeTree)
+		nodeTree.links.new(detailNode.outputs["Color"], decodeNode.inputs["Color"])
+		nodeTree.links.new(detailNode.outputs["Alpha"], decodeNode.inputs["Alpha"])
+
+		detailNormalNode = nodeTree.nodes.new("ShaderNodeNormalMap")
+		nodeTree.links.new(decodeNode.outputs["Color"], detailNormalNode.inputs["Color"])
+
+		intensityName = f"Cloth_Detail{letter}_NormalIntensity"
+		if intensityName in matInfo["mPropDict"]:
+			intensityNode = addPropertyNode(
+				matInfo["mPropDict"][intensityName],
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+			nodeTree.links.new(intensityNode.outputs["Value"], detailNormalNode.inputs["Strength"])
+
+		if detailNormalSocket is None:
+			geometryNode = nodeTree.nodes.get("geometryNode")
+			if geometryNode is None:
+				geometryNode = nodeTree.nodes.new("ShaderNodeNewGeometry")
+				geometryNode.name = "geometryNode"
+			detailNormalSocket = geometryNode.outputs["Normal"]
+		
+		normalMixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		normalMixNode.blend_type = "MIX"
+		nodeTree.links.new(maskSockets[index], normalMixNode.inputs["Fac"])
+		nodeTree.links.new(detailNormalSocket, normalMixNode.inputs["Color1"])
+		nodeTree.links.new(detailNormalNode.outputs["Normal"], normalMixNode.inputs["Color2"])
+
+		normalizeNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		normalizeNode.operation = "NORMALIZE"
+		nodeTree.links.new(normalMixNode.outputs["Color"], normalizeNode.inputs[0])
+		detailNormalSocket = normalizeNode.outputs["Vector"]
+
 		factorSocket = maskSockets[index]
 		rateName = f"Cloth_Detail{letter}_RoughnessBlendRate"
 
@@ -1404,7 +1440,10 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 			nodeTree.links.new(rateNode.outputs["Value"], factorNode.inputs[1])
 			factorSocket = factorNode.outputs["Value"]
 
-		matInfo["roughnessNodeLayerGroup"].addMixLayer(detailNode.outputs["Alpha"], factorSocket, mixType="MIX")
+		matInfo["roughnessNodeLayerGroup"].addMixLayer(decodeNode.outputs["Roughness"], factorSocket, mixType="MIX")
+	
+	if detailNormalSocket is not None:
+		matInfo["detailNormalSocket"] = detailNormalSocket
 
 	matInfo["_sf6ClothDetailBuilt"] = True
 	return imageNode
