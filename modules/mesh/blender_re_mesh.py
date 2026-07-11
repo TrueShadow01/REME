@@ -1035,7 +1035,7 @@ def importREMeshFile(filePath, options):
                         gameName=gameName,
                         arrangeNodes=True,
                         meshPath=filePath,
-                        sf6CmdIndex=2
+                        sf6CmdIndex=options.get("sf6CmdIndex", 0)
                     )
 
                     mdfImportEndTime = time.time()

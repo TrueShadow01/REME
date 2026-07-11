@@ -880,6 +880,15 @@ class ImportREMesh(Operator, ImportHelper):
         description="Convert all textures again instead of reading from already converted textures. Use this if you make changes to textures and need to reload them",
         default=False,
     )
+
+    sf6CmdIndex: IntProperty(
+        name="SF6 Color Index",
+        description="CMD color file index. For example, 0 loads cmd_000 and 2 loads cmd_002",
+        default=0,
+        min=0,
+        max=999,
+    )
+
     mdfPath: StringProperty(
         name="",
         description='Manually set the path of the mdf2 file. The MDF is found automatically if this is left blank.\nTip:Hold shift and right click the mdf2 file and click "Copy as path", then paste into this field',
@@ -977,6 +986,7 @@ class ImportREMesh(Operator, ImportHelper):
             column2.prop(self, "loadUnusedTextures")
             column2.prop(self, "loadUnusedProps")
             column2.prop(self, "useBackfaceCulling")
+            column2.prop(self, "sf6CmdIndex")
             column2.label(text="Manual MDF Path")
             column2.prop(self, "mdfPath")
 
@@ -1025,6 +1035,7 @@ class ImportREMesh(Operator, ImportHelper):
             "loadUnusedProps": self.loadUnusedProps,
             "useBackfaceCulling": self.useBackfaceCulling,
             "reloadCachedTextures": self.reloadCachedTextures,
+            "sf6CmdIndex": self.sf6CmdIndex,
             "mdfPath": self.mdfPath.replace('"', ""),
             "importAllLODs": self.importAllLODs,
             "importBlendShapes": self.importBlendShapes,
