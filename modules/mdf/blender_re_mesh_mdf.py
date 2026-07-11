@@ -1924,6 +1924,29 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if matInfo["alphaSocket"] is not None or hasAlpha or hasAlphaFlagB or hasAlphaTextureName or hasAlphaPropertyName or matInfo["isAlphaBlend"]:
 						alphaDebugPrint(materialName, matInfo, hasAlpha, hasAlphaFlagB, alphaDecision, hasRealAlphaTex, isCutout, isTransparent)
 				
+				if (matInfo["gameName"] == "SF6" and "ClothAniso_PrimalyAnisotropy" in matInfo["mPropDict"]):
+					anisNode = addPropertyNode(
+						matInfo["mPropDict"]["ClothAniso_PrimalyAnisotropy"],
+						matInfo["currentPropPos"],
+						nodeTree
+					)
+
+					anisoInputName = (
+						"Anisotropic IOR Level"
+						if "Anisotropic IOR Level" in nodeBSDF.inputs
+						else "Anisotropic"
+					)
+
+					links.new(anisoNode.outputs["Value"], nodeBSDF.inputs[anisoInputName])
+
+					if ("ClothAniso_SpecularShiftOffset" in matInfo["mPropDict"] and "Anisotropic Rotation" in nodeBSDF.inputs):
+						rotationNode = addPropertyNode(
+							matInfo["mPropDict"]["ClothAniso_SpecularShiftOffset"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+						links.new(rotationNode.outputs["Value"], nodeBSDF.inputs["Anisotropic Rotation"])
+
 				if matInfo["sheenSocket"] != None:
 					if bpy.app.version < (4,0,0):
 						links.new(matInfo["sheenSocket"],nodeBSDF.inputs["Sheen"])
