@@ -621,7 +621,7 @@ def getSF6CMDMaterialMap(cmdPath):
 def sf6RGBToLinear(value):
 	value = value / 255.0
 	if value <= 0.04045:
-		return value / 12.95
+		return value / 12.92
 	return ((value + 0.055) / 1.055) ** 2.4
 
 def applySF6CMDMaterial(materialName, materialMap, propDict):
