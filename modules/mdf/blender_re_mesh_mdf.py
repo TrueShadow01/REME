@@ -505,7 +505,7 @@ def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 	
 
 def findSF6CMDUserPath(meshPath, cmdIndex=0):
-	if meshPath == None or ".mesh" not in meshPath:
+	if meshPath is None or ".mesh" not in meshPath:
 		return None
 	
 	meshRoot = meshPath.split(".mesh", 1)[0]
@@ -514,12 +514,36 @@ def findSF6CMDUserPath(meshPath, cmdIndex=0):
 
 	characterName = os.path.basename(os.path.dirname(cmdDir))
 	costumeName = os.path.basename(cmdDir)
-	cmdBaseName = f"{characterName}_{costumeName}_cmd_{str(cmdIndex).zfill(3)}.user.2"
+	cmdNumber = str(cmdIndex).zfill(3)
+	cmdSuffix = f"_cmd_{cmdNumber}.user.2"
+
+	# Standard layout
+	cmdBaseName = (f"{characterName}_{costumeName}_cmd_{cmdNumber}.user.2")
 	cmdPath = os.path.join(cmdDir, cmdBaseName)
 
 	if os.path.isfile(cmdPath):
 		return cmdPath
 	
+	# Alternate layouts: search nearby parent folders without scanning the entire game extraction
+	searchDir = cmdDir
+
+	for _ in range(4):
+		try:
+			matches = sorted(
+				entry.path
+				for entry in os.scandir(searchDir)
+				if entry.is_file() and entry.name.lower().endswith(cmdSuffix.lower())
+			)
+		except OSError:
+			matches = []
+		
+		if matches:
+			return matches[0]
+		
+		parentDir = os.path.dirname(searchDir)
+		if parentDir == searchDir:
+			break
+		searchDir = parentDir
 	return None
 
 SF6_CMD_TYPES = (
