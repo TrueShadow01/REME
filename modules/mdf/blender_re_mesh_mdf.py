@@ -1925,7 +1925,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						alphaDebugPrint(materialName, matInfo, hasAlpha, hasAlphaFlagB, alphaDecision, hasRealAlphaTex, isCutout, isTransparent)
 				
 				if (matInfo["gameName"] == "SF6" and "ClothAniso_PrimalyAnisotropy" in matInfo["mPropDict"]):
-					anisNode = addPropertyNode(
+					anisoNode = addPropertyNode(
 						matInfo["mPropDict"]["ClothAniso_PrimalyAnisotropy"],
 						matInfo["currentPropPos"],
 						nodeTree
