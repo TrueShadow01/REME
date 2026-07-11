@@ -618,6 +618,12 @@ def getSF6CMDMaterialMap(cmdPath):
 	)
 	return materialMap
 
+def sf6RGBToLinear(value):
+	value = value / 255.0
+	if value <= 0.04045:
+		return value / 12.95
+	return ((value + 0.055) / 1.055) ** 2.4
+
 def applySF6CMDMaterial(materialName, materialMap, propDict):
 	colorIndexMap = (0, 1, 2, 3, 4, 5, 6, 7)
 
@@ -628,9 +634,9 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 		if record["colorEnabled"] and colorProp in propDict:
 			r, g, b, a = record["color"]
 			propDict[colorProp].propValue = [
-				r / 255.0,
-				g / 255.0,
-				b / 255.0,
+				sf6RGBToLinear(r),
+				sf6RGBToLinear(g),
+				sf6RGBToLinear(b),
 				a / 255.0,
 			]
 
@@ -1946,6 +1952,43 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							nodeTree
 						)
 						links.new(rotationNode.outputs["Value"], nodeBSDF.inputs["Anisotropic Rotation"])
+
+				if (matInfo["gameName"] == "SF6" and "ClothAniso_ColorRate" in matInfo["mPropDict"]):
+					colorRateNode = addPropertyNode(
+						matInfo["mPropDict"]["ClothAniso_ColorRate"],
+						matInfo["currentPropPos"],
+						nodeTree
+					) 
+
+					if "Sheen Weight" in nodeBSDF.inputs:
+						links.new(colorRateNode.outputs["Value"], nodeBSDF.inputs["Sheen Weight"])
+					
+					if ("ClothAniso_PrimalySpecularColor" in matInfo["mPropDict"] and "Sheen Tint" in nodeBSDF.inputs):
+						specularColorNode = addPropertyNode(
+							matInfo["mPropDict"]["ClothAniso_PrimalySpecularColor"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+
+						links.new(specularColorNode.outputs["Color"], nodeBSDF.inputs["Sheen Tint"])
+					
+					if ("ClothAniso_PrimalySpecSharpness" in matInfo["mPropDict"] and "Sheen Roughness" in nodeBSDF.inputs):
+						sharpnessNode = addPropertyNode(
+							matInfo["mPropDict"]["ClothAniso_PrimalySpecSharpness"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+
+						addNode = nodes.new("ShaderNodeMath")
+						addNode.operation = "ADD"
+						addNode.inputs[1].default_value = 1.0
+						links.new(sharpnessNode.outputs["Value"], addNode.inputs[0])
+
+						divideNode = nodes.new("ShaderNodeMath")
+						divideNode.operation = "DIVIDE"
+						divideNode.inputs[0].default_value = 1.0
+						links.new(addNode.outputs["Value"], divideNode.inputs[1])
+						links.new(divideNode.outputs["Value"], nodeBSDF.inputs["Sheen Roughness"])
 
 				if matInfo["sheenSocket"] != None:
 					if bpy.app.version < (4,0,0):
