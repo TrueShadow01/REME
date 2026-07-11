@@ -836,15 +836,22 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						
 					elif gameName == "SF6" and textureType in sf6DetailMaskTypeSet:
 						if textureType == "Cloth_DetailMask":
-							textureNodeInfoList.append(("SF6DETAIL", textureType, imageList, outputPath))
+							nodeType = "SF6DETAIL"
+						elif textureType == "Body_DetailBlendMask":
+							nodeType = "SF6BODYDETAIL"
 						else:
-							textureNodeInfoList.append(("UNKN", textureType, imageList, outputPath))
+							nodeType = "UNKN"
+
+						textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
 					elif gameName == "SF6" and textureType in sf6DetailNormalTypeSet:
 						if textureType.startswith("Cloth_DetailMap"):
-							textureNodeInfoList.append(("SF6DETAIL", textureType, imageList, outputPath))
+							nodeType = "SF6DETAIL"
+						elif (textureType == "Body_UniqueDetail_NRRC" or textureType.startswith("Body_DetailMap")):
+							nodeType = "SF6BODYDETAIL"
 						else:
-							textureNodeInfoList.append(("UNKN",textureType,imageList,outputPath))
-
+							nodeType = "UNKN"
+						
+						textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
 					elif autoDetectedAlbedo:
 						textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
 					
