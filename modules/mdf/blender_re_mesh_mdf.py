@@ -236,7 +236,8 @@ MiscMapTypes = set([
 sf6DetailMaskTypeSet = set([
 	"Body_DetailBlendMask",
 	"Cloth_DetailMask",
-	"BodyMuscle_Mask"
+	"BodyMuscle_Mask",
+	"Face_DetailMapBlendMask",
 ])
 
 sf6DetailNormalTypeSet = set([
@@ -245,6 +246,10 @@ sf6DetailNormalTypeSet = set([
 	"Body_DetailMapB",
 	"Body_DetailMapC",
 	"Body_DetailMapD",
+	"Face_DetailMapA",
+	"Face_DetailMapB",
+	"Face_DetailMapC",
+	"Face_DetailMapD",
 	"BodyMuscle_NormalA",
 	"BodyMuscle_NormalB",
 	"BodyMuscle_NormalC",
@@ -865,6 +870,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							nodeType = "SF6DETAIL"
 						elif textureType == "Body_DetailBlendMask":
 							nodeType = "SF6BODYDETAIL"
+						elif textureType == "Face_DetailBlendMask":
+							nodeType = "SF6FACEDETAIL"
 						else:
 							nodeType = "UNKN"
 
@@ -874,6 +881,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							nodeType = "SF6DETAIL"
 						elif (textureType == "Body_UniqueDetail_NRRC" or textureType.startswith("Body_DetailMap")):
 							nodeType = "SF6BODYDETAIL"
+						elif textureType.startswith("Face_DetailMap"):
+							nodeType = "SF6FACEDETAIL"
 						else:
 							nodeType = "UNKN"
 						

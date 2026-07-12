@@ -1600,6 +1600,103 @@ def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
 	matInfo["_sf6BodyDetailBuilt"] = True
 	return imageNode
 
+def newSF6FaceDetailNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if matInfo.get("_sf6FaceDetailBuilt", False):
+		return imageNode
+
+	maskNode = matInfo["textureNodeDict"].get("Face_DetailMapBlendMask")
+	if maskNode is None:
+		return imageNode
+	
+	maskNode.image.colorspace_settings.name = "Non-Color"
+
+	separataMask = nodeTree.nodes.new("ShaderNodeSeparateColor")
+	nodeTree.links.new(maskNode.outputs["Color"], separataMask.inputs["Color"])
+
+	maskSockets = (
+		separataMask.outputs["Red"],
+		separataMask.outputs["Green"],
+		separataMask.outputs["Blue"],
+		maskNode.outputs["Alpha"],
+	)
+
+	geometryNode = nodeTree.nodes.get("geometryNode")
+	if geometryNode is None:
+		geometryNode = nodeTree.nodes.new("ShaderNodeNewGeometry")
+		geometryNode.name = "geometryNode"
+	
+	detailNormalSocket = geometryNode.outputs["Normal"]
+	uvNode = nodeTree.nodes.get("UVMap1Node")
+
+	for index, letter in enumerate(("A", "B", "C", "D")):
+		detailNode = matInfo["textureNodeDict"].get(f"Face_DetailMap{letter}")
+		if detailNode is None:
+			continue
+
+		detailNode.image.colorspace_settings.name = "Non-Color"
+
+		tilingProp = matInfo["mPropDict"].get(f"Face_DetailMap{letter}_Tilling")
+		if uvNode is not None and tilingProp is not None:
+			values = tilingProp.propValue
+
+			mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+			mappingNode.inputs["Scale"].default_value = (
+				values[0],
+				values[1],
+				1.0
+			)
+			mappingNode.inputs["Location"].default_value = (
+				values[2],
+				values[3],
+				0.0
+			)
+
+			nodeTree.links.new(uvNode.outputs["UV"], mappingNode.inputs["Vector"])
+			nodeTree.links.new(mappingNode.outputs["Vector"], detailNode.inputs["Vector"])
+		
+		decodeNode = getBentNormalNodeGroup(nodeTree)
+		nodeTree.links.new(detailNode.outputs["Color"], decodeNode.inputs["Color"])
+		nodeTree.links.new(detailNode.outputs["Alpha"], decodeNode.inputs["Alpha"])
+
+		normalMapNode = nodeTree.nodes.new("ShaderNodeNormalMap")
+		nodeTree.links.new(decodeNode.outputs["Color"], normalMapNode.inputs["Color"])
+
+		intensityProp = matInfo["mPropDict"].get(f"Face_DetailMap{letter}_NormalIntensity")
+		if intensityProp is not None:
+			normalMapNode.inputs["Strength"].default_value = (intensityProp.propValue[0])
+
+		mixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		nodeTree.links.new(maskSockets[index], mixNode.inputs["Fac"])
+		nodeTree.links.new(detailNormalSocket, mixNode.inputs["Color1"])
+		nodeTree.links.new(normalMapNode.outputs["Normal"], mixNode.inputs["Color2"])
+
+		normalizeNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		normalizeNode.operation = "NORMALIZE"
+		nodeTree.links.new(mixNode.outputs["Color"], normalizeNode.inputs[0])
+		detailNormalSocket = normalizeNode.outputs["Vector"]
+
+		roughnessProp = matInfo["mPropDict"].get(f"Face_DetailMap{letter}_Roughness")
+		if roughnessProp is not None:
+			roughnessNode = addPropertyNode(
+				roughnessProp,
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			roughnessFactorNode = nodeTree.nodes.new("ShaderNodeMath")
+			roughnessFactorNode.operation = "MULTIPLY"
+			roughnessFactorNode.use_clamp = True
+			nodeTree.links.new(maskSockets[index], roughnessFactorNode.inputs[0])
+			nodeTree.links.new(roughnessNode.outputs["Value"], roughnessFactorNode.inputs[1])
+
+			matInfo["roughnessNodeLayerGroup"].addMixLayer(decodeNode.outputs["Roughness"], roughnessFactorNode.outputs["Value"], mixType="MIX")
+	
+	matInfo["detailNormalSocket"] = detailNormalSocket
+	matInfo["_sf6FaceDetailBuilt"] = True
+	return imageNode
+
 def newCMASKNode (nodeTree,textureType,matInfo):
 	if matInfo["gameName"] == "SF6":
 		return newSF6MaskNode(nodeTree, textureType, matInfo)
@@ -1939,6 +2036,7 @@ nodeDict = {
 	#"UNKN":newUNKNNode,
 	"SF6DETAIL":newSF6ClothDetailNode,
 	"SF6BODYDETAIL": newSF6BodyDetailNode,
+	"SF6FACEDETAIL": newSF6FaceDetailNode,
 	}
 def addTextureNode(nodeTree,nodeType,textureType,matInfo):
 	#print(nodeType)
