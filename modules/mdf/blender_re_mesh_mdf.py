@@ -504,46 +504,41 @@ def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 	return inputPath	
 	
 
-def findSF6CMDUserPath(meshPath, cmdIndex=0):
+def findSF6CMDUserPath(meshPath, cmdIndex=1, costumeIndex=None):
 	if meshPath is None or ".mesh" not in meshPath:
 		return None
 	
 	meshRoot = meshPath.split(".mesh", 1)[0]
 	meshDir = os.path.dirname(meshRoot)
-	cmdDir = os.path.dirname(meshDir)
+	meshCostumeDir = os.path.dirname(meshDir)
+	characterDir = os.path.dirname(meshCostumeDir)
+	characterName = os.path.basename(os.path.dirname(characterDir))
 
-	characterName = os.path.basename(os.path.dirname(cmdDir))
-	costumeName = os.path.basename(cmdDir)
+	if costumeIndex is None:
+		costumeName = os.path.basename(meshCostumeDir)
+	else:
+		costumeName = str(costumeIndex).zfill(3)
+
 	cmdNumber = str(cmdIndex).zfill(3)
 	cmdSuffix = f"_cmd_{cmdNumber}.user.2"
+	cmdDir = os.path.join(characterDir, costumeName)
 
-	# Standard layout
+	# Standard SF6 character CMD layout
 	cmdBaseName = (f"{characterName}_{costumeName}_cmd_{cmdNumber}.user.2")
 	cmdPath = os.path.join(cmdDir, cmdBaseName)
 
 	if os.path.isfile(cmdPath):
 		return cmdPath
 	
-	# Alternate layouts: search nearby parent folders without scanning the entire game extraction
-	searchDir = cmdDir
+	# allow alternative filenames, remain inside selected costume
+	try:
+		matches = sorted(entry.path for entry in os.scandir(cmdDir) if entry.is_file() and entry.name.lower().endswith(cmdSuffix.lower()))
+	except OSError:
+		matches = []
+	
+	if matches:
+		return matches[0]
 
-	for _ in range(4):
-		try:
-			matches = sorted(
-				entry.path
-				for entry in os.scandir(searchDir)
-				if entry.is_file() and entry.name.lower().endswith(cmdSuffix.lower())
-			)
-		except OSError:
-			matches = []
-		
-		if matches:
-			return matches[0]
-		
-		parentDir = os.path.dirname(searchDir)
-		if parentDir == searchDir:
-			break
-		searchDir = parentDir
 	return None
 
 SF6_CMD_TYPES = (
@@ -684,7 +679,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 			if enabled and propName in propDict:
 				propDict[propName].propValue = [value]
 
-def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=0):
+def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=1,sf6CostumeIndex=1):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
 	USE_DDS = bpy.context.preferences.addons[ADDON_NAME].preferences.useDDS == True and bpy.app.version >= (4,2,0)
 	
@@ -705,7 +700,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 	sf6CMDMaterialMap = {}
 
 	if gameName == "SF6":
-		sf6CMDUserPath = findSF6CMDUserPath(meshPath, sf6CmdIndex)
+		sf6CMDUserPath = findSF6CMDUserPath(meshPath, sf6CmdIndex, sf6CostumeIndex)
 		if sf6CMDUserPath != None:
 			print(f"[SF6 CMD] Using {sf6CMDUserPath}")
 			sf6CMDMaterialMap = getSF6CMDMaterialMap(sf6CMDUserPath)
