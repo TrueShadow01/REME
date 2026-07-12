@@ -679,7 +679,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 					a / 255.0
 				]
 			else:
-				r, g, b, a = record["color"]
+				r, g, b, a = record[colorProp].propValue
 				propDict[colorProp].propValue = [
 					sf6RGBToLinear(r),
 					sf6RGBToLinear(g),
