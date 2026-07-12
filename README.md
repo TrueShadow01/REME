@@ -24,10 +24,30 @@ A Blender addon for importing/exporting RE Engine mesh, material, texture-adjace
 - Import materials and texture bindings
 - Import blend shapes as Blender shape keys for supported mesh formats
 - Experimental Monster Hunter Wilds mesh import support and Legacy (pre SF6)
-- Experimental Street Fighter 6 material reconstruction, including CMD costume colors, CMASK customization, hair tinting, cloth shading and body detail maps
+- Experimental Street Fighter 6 material reconstruction
+- SF6 CMD costume-color parsing, including fixed and variable-length color clusters
+- SF6 CMASK/CMASK2 colors, cloth shading, body details, hair tinting and shared-head material support
 - Batch export tools
 - Presets for multiple RE Engine games
 - Texture/material helper tools
+
+## Street Fighter 6 Support
+
+Street Fighter 6 material import is experimental. The addon can reconstruct costume colors from extracted CMD `.user.2` files and apply them to supported MDF materials.
+
+### Import Options
+
+- **SF6 Costume Index** selects the costume folder containing the CMD files. For example, `1` selects folder `001`.
+- **SF6 Color Index** selects the CMD color file. For example, `1` selects `cmd_001.user.2`.
+
+Shared character meshes stored under costume folder `000` can use CMD data from the selected costume folder.
+
+Example for Costume 2, Color 1:
+
+```text
+SF6 Costume Index: 2
+SF6 Color Index: 1
+```
 
 ## Known Limitations
 - Blender 5.1 is not supported
@@ -36,14 +56,17 @@ A Blender addon for importing/exporting RE Engine mesh, material, texture-adjace
 - Legacy blend-shape import has been improved but regression testing across older titles is still needed
 - Blend-shape export is not guaranteed for all supported import paths
 - Some newer game formats may import but not export correctly
-- Street Fighter 6 shared head materials may not receive the selected costume colors until costume-aware CMD lookup is implemented
-- Street Fighter 6 material reconstruction is still being validated across fighters, costumes and color variants
+- Street Fighter 6 material support remains experimental and may vary by fighter, costume and shader
+- Damage, sweat, animated muscle, cloth-wave and some auxiliary SF6 material effects are not reconstructed
+- Blender materials may not reproduce every RE Engine lighting and shader effect exactly
 - Material reconstruction may differ from in-game rendering
 
 ## Roadmap
 
 ### Near Term
-- Complete Street Fighter 6 material reconstruction, including costume-aware CMD lookup, shared head materials, transparency, decals and remaining shader variations
+- Validate Street Fighter 6 materials across more fighters, costumes, color variants and shader types
+- Add automated regression tests for CMD parsing and material matching
+- Improve remaining SF6 effects such as damage, sweat, animated deformation and specialized transparency
 - Improve texture import reliability and support for newer compression formats
 - Validate compatibility with RE2, RE3, RE4R, RE7RT and newer RE Engine titles
 
