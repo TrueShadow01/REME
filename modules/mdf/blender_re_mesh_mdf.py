@@ -669,6 +669,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 		colorIndex = colorIndexMap[recordIndex]
 		colorProp = f"CustomizeColor_{colorIndex}"
 
+		# the amount of typos I had here are insane
 		if colorProp in propDict:
 			if record["colorEnabled"]:
 				r, g, b, a = record["color"]
@@ -676,15 +677,15 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 					sf6RGBToLinear(r),
 					sf6RGBToLinear(g),
 					sf6RGBToLinear(b),
-					a / 255.0
+					a / 255.0,
 				]
 			else:
 				r, g, b, a = propDict[colorProp].propValue
 				propDict[colorProp].propValue = [
-					sf6RGBToLinear(r),
-					sf6RGBToLinear(g),
-					sf6RGBToLinear(b),
-					a / 255.0,
+					sf6RGBToLinear(r * 255.0),
+					sf6RGBToLinear(g * 255.0),
+					sf6RGBToLinear(b * 255.0),
+					a,
 				]
 
 		optionProps = (
