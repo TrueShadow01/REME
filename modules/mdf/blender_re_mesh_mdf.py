@@ -2143,7 +2143,23 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							if sssParamNode != None:
 								links.new(sssParamNode.outputs["Value"],sssMultNode.inputs[1])
 							if "Subsurface Weight" in nodeBSDF.inputs:	
-								links.new(sssMultNode.outputs["Value"],nodeBSDF.inputs["Subsurface Weight"])	
+								links.new(sssMultNode.outputs["Value"],nodeBSDF.inputs["Subsurface Weight"])
+					elif matInfo["gameName"] == "SF6":
+						mmtrName = matInfo["mmtrName"].lower()
+						isSF6Skin = any(name in mmtrName for name in (
+							"character_face",
+							"character_body",
+						))
+
+						if isSF6Skin and "Subsurface Weight" in nodeBSDF.inputs:
+							sssMultNode = nodes.new("ShaderNodeMath")
+							sssMultNode.label = "SF6 Skin SSS"
+							sssMultNode.location = matInfo["subsurfaceSocket"].node.location + Vector((300, 0))
+							sssMultNode.operation = "MULTIPLY"
+
+							links.new(matInfo["subsurfaceSocket"], sssMultNode.inputs[0])
+							sssMultNode.inputs[1].default_value = 0.18
+							links.new(sssMultNode.outputs["Value"], nodeBSDF.inputs["Subsurface Weight"])
 				#Mix Shaders
 				
 				currentPos = [nodeBSDF.location[0]+300,nodeBSDF.location[1]]
