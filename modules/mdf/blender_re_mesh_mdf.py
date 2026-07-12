@@ -1806,20 +1806,85 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						
 						links.new(normalVectorRotateNode.outputs["Vector"],nodeBSDF.inputs["Normal"])
 						
-				if "BaseShiftMap" in matInfo["textureNodeDict"] or "BaseAnisoShiftMap" in matInfo["textureNodeDict"] :
-					#TODO Add proper hair setup here, this is a hacky temporary setup
-					shiftNodeName = "BaseShiftMap" if "BaseShiftMap" in matInfo["textureNodeDict"] else "BaseAnisoShiftMap"
-					fresnelNode = nodes.new("ShaderNodeFresnel")
-					fresnelNode.location = matInfo["textureNodeDict"][shiftNodeName].location + Vector((300,0))
-					links.new(matInfo["textureNodeDict"][shiftNodeName].outputs["Alpha"],fresnelNode.inputs["IOR"])
-					if normalNode != None:
-						links.new(normalNode.outputs["Normal"],fresnelNode.inputs["Normal"])
-					fresnelClampNode = nodes.new("ShaderNodeClamp")
-					fresnelClampNode.location = fresnelNode.location + Vector((300,0))
-					fresnelClampNode.inputs["Max"].default_value = 0.75
-					links.new(fresnelNode.outputs["Fac"],fresnelClampNode.inputs["Value"])
-					
-					matInfo["metallicNodeLayerGroup"].addMixLayer(fresnelClampNode.outputs["Result"])
+				if ("BaseShiftMap" in matInfo["textureNodeDict"] or "BaseAnisoShiftMap" in matInfo["textureNodeDict"]):
+					shiftNodeName = ("BaseShiftMap" if "BaseShiftMap" in matInfo["textureNodeDict"] else "BaseAnisoShiftMap")
+					shiftNode = matInfo["textureNodeDict"][shiftNodeName]
+
+					if matInfo["gameName"] == "SF6":
+						anisoInputName = ("Anisotropic IOR Level" if "Anisotropic IOR Level" in nodeBSDF.inputs else "Anisotropic")
+
+						if "Primaly_Anisotropy" in matInfo["mPropDict"]:
+							anisoNode = addPropertyNode(
+								matInfo["mPropDict"]["Primaly_Anisotropy"],
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+							links.new(anisoNode.outputs["Value"], nodeBSDF.inputs[anisoInputName])
+						else:
+							nodeBSDF.inputs[anisoInputName].default_value = 1.0
+						
+						if "Anisotropic Rotation" in nodeBSDF.inputs:
+							links.new(shiftNode.outputs["Alpha"], nodeBSDF.inputs["Anisotropic Rotation"])
+						
+						if ("SpecularIntensity" in matInfo["mPropDict"] and "Specular IOR Level" in nodeBSDF.inputs):
+							specularNode = addPropertyNode(
+								matInfo["mPropDict"]["SpecularIntensity"],
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+							links.new(specularNode.outputs["Value"], nodeBSDF.inputs["Specular IOR Level"])
+						
+						if ("SpecularIntensity" in matInfo["mPropDict"] and "Coat Weight" in nodeBSDF.inputs):
+							coatWeightNode = addPropertyNode(
+								matInfo["mPropDict"]["SpecularIntensity"],
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+							links.new(coatWeightNode.outputs["Value"], nodeBSDF.inputs["Coat Weight"])
+
+						if ("SecondarySpecularColor" in matInfo["mPropDict"] and "Coat Tint" in nodeBSDF.inputs):
+							coatColorNode = addPropertyNode(
+								matInfo["mPropDict"]["SecondarySpecularColor"],
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+							links.new(coatColorNode.outputs["Color"], nodeBSDF.inputs["Coat Tint"])
+
+						if ("SecondSpec_Sharpness" in matInfo["mPropDict"] and "Coat Roughness" in nodeBSDF.inputs):
+							sharpnessNode = addPropertyNode(
+								matInfo["mPropDict"]["SecondSpec_Sharpness"],
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+
+							addNode = nodes.new("ShaderNodeMath")
+							addNode.operation = "ADD"
+							addNode.inputs[1].default_value = 1.0
+							links.new(sharpnessNode.outputs["Value"], addNode.inputs[0])
+
+							roughnessNode = nodes.new("ShaderNodeMath")
+							roughnessNode.operation = "POWER"
+							roughnessNode.inputs[1].default_value = -0.5
+							roughnessNode.use_clamp = True
+							links.new(addNode.outputs["Value"], roughnessNode.inputs[0])
+							links.new(roughnessNode.outputs["Value"], nodeBSDF.inputs["Coat Roughness"])
+						
+						if (normalNode is not None and "Coat Normal" in nodeBSDF.inputs):
+							links.new(normalNode.outputs["Normal"], nodeBSDF.inputs["Coat Normal"])
+					else:
+						fresnelNode = nodes.new("ShaderNodeFresnel")
+						fresnelNode.location = shiftNode.location + Vector((300, 0))
+						links.new(shiftNode.outputs["Alpha"], fresnelNode.inputs["IOR"])
+
+						if normalNode is not None:
+							links.new(normalNode.outputs["Normal"], fresnelNode.inputs["Normal"])
+
+						fresnelClampNode = nodes.new("ShaderNodeClamp")
+						fresnelClampNode.location = (fresnelNode.location + Vector((300, 0)))
+						fresnelClampNode.inputs["Max"].default_value = 0.75
+						links.new(fresnelNode.outputs["Fac"], fresnelClampNode.inputs["Value"])
+						matInfo["metallicNodeLayerGroup"].addMixLayer(fresnelClampNode.outputs["Result"])
+
 				if matInfo["aoNodeLayerGroup"].currentOutSocket != None and not matInfo["disableAO"]:
 					#This isn't the correct way to apply AO but EEVEE has no good ways of doing AO maps that doesn't have downsides (such as killing screenspace reflections and subsurface)
 					
