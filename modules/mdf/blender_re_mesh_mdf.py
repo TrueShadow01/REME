@@ -675,7 +675,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 	if records:
 		print(f"[SF6 CMD] {matchType}: {materialName} -> {cmdMaterialName}")
 	elif any(name.startswith("CustomizeColor_") for name in propDict):
-		print(f"[SF6 CMD] unmatched customizable material: {materialName}")
+		print(f"[SF6 CMD] no override, using MDF defaults: {materialName}")
 
 	for recordIndex, record in enumerate(records):
 		colorIndex = colorIndexMap[recordIndex]
