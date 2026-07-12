@@ -246,8 +246,13 @@ def ReadBlendShapeByteBuffer(blendShapeBuffer, tags):
 	return blendShapeArray
 
 def ReadBlendShapeShortBuffer(blendShapeBuffer, tags):
+	recordSize = np.dtype("<4H").itemsize
+	usableSize = len(blendShapeBuffer) - (len(blendShapeBuffer) % recordSize)
+	if usableSize != len(blendShapeBuffer):
+		print(f"Blend shape short contains {len(blendShapeBuffer) - usableSize} trailing padding bytes.")
+		
 	blendShapeArray = np.frombuffer(
-		blendShapeBuffer,
+		memoryview(blendShapeBuffer)[:usableSize],
 		dtype="<4H",
 	)
 	# blendShapeFloatArray = np.empty((len(blendShapeBuffer)//8), dtype=np.dtype("<3f"))
