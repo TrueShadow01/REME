@@ -889,6 +889,14 @@ class ImportREMesh(Operator, ImportHelper):
         max=999,
     )
 
+    sf6CostumeIndex: IntProperty(
+        name="SF6 Costume Index",
+        description="Costume folder containing the CMD Files. For example, 1 uses costume folder 001. Shared meshes under folder 000 can use this to load the selected costume colors.",
+        default=1,
+        min=0,
+        max=999,
+    )
+
     mdfPath: StringProperty(
         name="",
         description='Manually set the path of the mdf2 file. The MDF is found automatically if this is left blank.\nTip:Hold shift and right click the mdf2 file and click "Copy as path", then paste into this field',
@@ -987,6 +995,7 @@ class ImportREMesh(Operator, ImportHelper):
             column2.prop(self, "loadUnusedProps")
             column2.prop(self, "useBackfaceCulling")
             column2.prop(self, "sf6CmdIndex")
+            column2.prop(self, "sf6CostumeIndex")
             column2.label(text="Manual MDF Path")
             column2.prop(self, "mdfPath")
 
@@ -1036,6 +1045,7 @@ class ImportREMesh(Operator, ImportHelper):
             "useBackfaceCulling": self.useBackfaceCulling,
             "reloadCachedTextures": self.reloadCachedTextures,
             "sf6CmdIndex": self.sf6CmdIndex,
+            "sf6CostumeIndex": self.sf6CostumeIndex,
             "mdfPath": self.mdfPath.replace('"', ""),
             "importAllLODs": self.importAllLODs,
             "importBlendShapes": self.importBlendShapes,
