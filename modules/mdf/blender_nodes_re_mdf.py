@@ -1461,12 +1461,12 @@ def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
 	separateMask = nodeTree.nodes.new("ShaderNodeSeparateColor")
 	nodeTree.links.new(maskNode.outputs["Color"], separateMask.inputs["Color"])
 
-	maskSockets = {
+	maskSockets = (
 		separateMask.outputs["Red"],
 		separateMask.outputs["Green"],
 		separateMask.outputs["Blue"],
 		maskNode.outputs["Alpha"],
-	}
+	)
 
 	detailNormalSocket = None
 	uniqueNode = matInfo["textureNodeDict"].get("Body_UniqueDetail_NRRC")
@@ -1479,7 +1479,7 @@ def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
 		nodeTree.links.new(uniqueNode.outputs["Alpha"], uniqueDecode.inputs["Alpha"])
 
 		uniqueNormal = nodeTree.nodes.new("ShaderNodeNormalMap")
-		nodeTree.links.new(uniqueNode.outputs["Color"], uniqueNormal.inputs["Color"])
+		nodeTree.links.new(uniqueDecode.outputs["Color"], uniqueNormal.inputs["Color"])
 
 		intensityProp = matInfo["mPropDict"].get("Body_UniqueDetail_NormalIntensity")
 		if intensityProp is not None:
