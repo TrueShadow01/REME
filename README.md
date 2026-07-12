@@ -24,6 +24,7 @@ A Blender addon for importing/exporting RE Engine mesh, material, texture-adjace
 - Import materials and texture bindings
 - Import blend shapes as Blender shape keys for supported mesh formats
 - Experimental Monster Hunter Wilds mesh import support and Legacy (pre SF6)
+- Experimental Street Fighter 6 material reconstruction, including CMD costume colors, CMASK customization, hair tinting, cloth shading and body detail maps
 - Batch export tools
 - Presets for multiple RE Engine games
 - Texture/material helper tools
@@ -35,12 +36,14 @@ A Blender addon for importing/exporting RE Engine mesh, material, texture-adjace
 - Legacy blend-shape import has been improved but regression testing across older titles is still needed
 - Blend-shape export is not guaranteed for all supported import paths
 - Some newer game formats may import but not export correctly
+- Street Fighter 6 shared head materials may not receive the selected costume colors until costume-aware CMD lookup is implemented
+- Street Fighter 6 material reconstruction is still being validated across fighters, costumes and color variants
 - Material reconstruction may differ from in-game rendering
 
 ## Roadmap
 
 ### Near Term
-- Improve Street Fighter 6 material and shader reconstruction, including alpha maps, UV usage, hair, decals and layered materials
+- Complete Street Fighter 6 material reconstruction, including costume-aware CMD lookup, shared head materials, transparency, decals and remaining shader variations
 - Improve texture import reliability and support for newer compression formats
 - Validate compatibility with RE2, RE3, RE4R, RE7RT and newer RE Engine titles
 
