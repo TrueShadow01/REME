@@ -832,10 +832,42 @@ def newALBANode (nodeTree,textureType,matInfo):
 	return imageNode
 def newALBNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
-	currentPos = [imageNode.location[0]+300,imageNode.location[1]]
+	currentPos = [imageNode.location[0] + 300,imageNode.location[1]]
 	
 	matInfo["albedoNodeLayerGroup"].addMixLayer(imageNode.outputs["Color"])
 	
+	isSF6HairAlbedo = (
+		matInfo["gameName"] == "SF6"
+		and textureType == "BaseAnisoShiftMap"
+		and "CustomizeColor_0" in matInfo["mPropDict"]
+		and "CustomizeColor_Mask" not in matInfo["textureNodeDict"]
+	)
+
+	if isSF6HairAlbedo:
+		colorNode = addPropertyNode(
+			matInfo["mPropDict"]["CustomizeColor_0"],
+			matInfo["currentPropPos"],
+			nodeTree
+		)
+
+		scaleNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		scaleNode.blend_type = "MULTIPLY"
+		scaleNode.inputs["Fac"].default_value = 1.0
+		scaleNode.inputs["Color2"].default_value = (2.0, 2.0, 2.0, 1.0)
+		nodeTree.links.new(colorNode.outputs["Color"], scaleNode.inputs["Color1"])
+
+		factorSocket = None
+		rateName = "CustomizeColor_0_BlendRate"
+
+		if rateName in matInfo["mPropDict"]:
+			rateNode = addPropertyNode(
+				matInfo["mPropDict"][rateName],
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+			factorSocket = rateNode.outputs["Value"]
+		
+		matInfo["albedoNodeLayerGroup"].addMixLayer(scaleNode.outputs["Color"], factorSocket, mixType="MULTIPLY", mixFactor=1.0)
 	return imageNode
 def newNRMRNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
