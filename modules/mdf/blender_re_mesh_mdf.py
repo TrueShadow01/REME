@@ -663,11 +663,11 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 			cmdMaterialName = caseMatchedName
 			matchType = "case-insensitive"
 		else:
-			materialAlliases = {
+			materialAliases = {
 				"esf_hair_front": "esf_Hair_Layer00"
 			}
 
-			aliasTarget = materialAlliases.get(materialName.casefold())
+			aliasTarget = materialAliases.get(materialName.casefold())
 
 			if aliasTarget is not None:
 				cmdMaterialName = caseInsensitiveMaterialMap.get(
