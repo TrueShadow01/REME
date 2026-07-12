@@ -614,9 +614,16 @@ def getSF6CMDMaterialMap(cmdPath):
 		stringEnd = nameOffset + charCount * 2
 		arrayOffset = (stringEnd + 3) & ~3
 
-		if arrayOffset + 36 > len(data):
+		if arrayOffset + 4 > len(data):
 			continue
-		if data[stringEnd - 2:stringEnd] != b"\x00\x00" or u32(arrayOffset) != 8:
+		if data[stringEnd - 2:stringEnd] != b"\x00\x00":
+			continue
+
+		colorCount = u32(arrayOffset)
+
+		if not 1 <= colorCount <= 8:
+			continue
+		if arrayOffset + 4 + colorCount * 4 > len(data):
 			continue
 	
 		try:
@@ -627,7 +634,7 @@ def getSF6CMDMaterialMap(cmdPath):
 		if not materialName or not all(32 <= ord(char) <= 126 for char in materialName):
 			continue
 
-		colorRefs = [u32(arrayOffset + 4 + index * 4) for index in range(8)]
+		colorRefs = [u32(arrayOffset + 4 + index * 4) for index in range(colorCount)]
 		if all(ref in colorRecords for ref in colorRefs):
 			materialMap[materialName] = [colorRecords[ref] for ref in colorRefs]
 			
