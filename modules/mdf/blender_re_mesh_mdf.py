@@ -669,14 +669,23 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 		colorIndex = colorIndexMap[recordIndex]
 		colorProp = f"CustomizeColor_{colorIndex}"
 
-		if record["colorEnabled"] and colorProp in propDict:
-			r, g, b, a = record["color"]
-			propDict[colorProp].propValue = [
-				sf6RGBToLinear(r),
-				sf6RGBToLinear(g),
-				sf6RGBToLinear(b),
-				a / 255.0,
-			]
+		if colorProp in propDict:
+			if record["colorEnabled"]:
+				r, g, b, a = record["color"]
+				propDict[colorProp].propValue = [
+					sf6RGBToLinear(r),
+					sf6RGBToLinear(g),
+					sf6RGBToLinear(b),
+					a / 255.0
+				]
+			else:
+				r, g, b, a = record["color"]
+				propDict[colorProp].propValue = [
+					sf6RGBToLinear(r),
+					sf6RGBToLinear(g),
+					sf6RGBToLinear(b),
+					a / 255.0,
+				]
 
 		optionProps = (
 			("blendRate", f"CustomizeColor_{colorIndex}_BlendRate"),
