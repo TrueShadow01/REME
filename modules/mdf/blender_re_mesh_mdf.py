@@ -651,7 +651,16 @@ def sf6RGBToLinear(value):
 def applySF6CMDMaterial(materialName, materialMap, propDict):
 	colorIndexMap = (0, 1, 2, 3, 4, 5, 6, 7)
 
-	for recordIndex, record in enumerate(materialMap.get(materialName, [])):
+	cmdMaterialName = materialName
+
+	# Some SF6 hair pieces share hair material CMD colors
+	if cmdMaterialName not in materialMap:
+		hairMaterialAliases = {
+			"esf_Hair_Front": "esf_Hair_Layer00"
+		}
+		cmdMaterialName = hairMaterialAliases.get(cmdMaterialName, cmdMaterialName)
+
+	for recordIndex, record in enumerate(materialMap.get(cmdMaterialName, [])):
 		colorIndex = colorIndexMap[recordIndex]
 		colorProp = f"CustomizeColor_{colorIndex}"
 
