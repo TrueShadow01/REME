@@ -647,6 +647,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 	colorIndexMap = (0, 1, 2, 3, 4, 5, 6, 7)
 
 	cmdMaterialName = materialName
+	matchType = "exact"
 
 	# Some SF6 hair pieces share hair material CMD colors
 	if cmdMaterialName not in materialMap:
@@ -654,6 +655,15 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 			"esf_Hair_Front": "esf_Hair_Layer00"
 		}
 		cmdMaterialName = hairMaterialAliases.get(cmdMaterialName, cmdMaterialName)
+		if cmdMaterialName != materialName:
+			matchType = "alias"
+	
+	records = materialMap.get(cmdMaterialName, [])
+
+	if records:
+		print(f"[SF6 CMD] {matchType}: {materialName} -> {cmdMaterialName}")
+	elif any(name.startswith("CustomizeColor_") for name in propDict):
+		print(f"[SF6 CMD] unmatched customizable material: {materialName}")
 
 	for recordIndex, record in enumerate(materialMap.get(cmdMaterialName, [])):
 		colorIndex = colorIndexMap[recordIndex]
