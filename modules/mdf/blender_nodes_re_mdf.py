@@ -1519,6 +1519,17 @@ def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
 
 		detailNormalSocket = uniqueNormal.outputs["Normal"]
 	
+		uniqueRoughnessProp = matInfo["mPropDict"].get("Body_UniqueDetail_Roughness")
+
+		if uniqueRoughnessProp is not None:
+			uniqueRoughnessNode = addPropertyNode(
+				uniqueRoughnessProp,
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			matInfo["roughnessNodeLayerGroup"].addMixLayer(uniqueDecode.outputs["Roughness"], uniqueRoughnessNode.outputs["Value"], mixType="MIX")
+
 	uvNode = nodeTree.nodes.get("UVMap1Node")
 
 	for index, letter in enumerate(("A", "B", "C", "D")):
@@ -1564,6 +1575,24 @@ def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
 		normalizeNode.operation = "NORMALIZE"
 		nodeTree.links.new(mixNode.outputs["Color"], normalizeNode.inputs[0])
 		detailNormalSocket = normalizeNode.outputs["Vector"]
+
+		roughnessProp = matInfo["mPropDict"].get(f"Body_DetailMap{letter}_Roughness")
+
+		if roughnessProp is not None:
+			roughnessNode = addPropertyNode(
+				roughnessProp,
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			roughnessFactorNode = nodeTree.nodes.new("ShaderNodeMath")
+			roughnessFactorNode.operation = "MULTIPLY"
+			roughnessFactorNode.use_clamp = True
+
+			nodeTree.links.new(maskSockets[index], roughnessFactorNode.inputs[0])
+			nodeTree.links.new(roughnessNode.outputs["Value"], roughnessFactorNode.inputs[1])
+
+			matInfo["roughnessNodeLayerGroup"].addMixLayer(decodeNode.outputs["Roughness"], roughnessFactorNode.outputs["Value"], mixType="MIX")
 	
 	if detailNormalSocket is not None:
 		matInfo["detailNormalSocket"] = detailNormalSocket
