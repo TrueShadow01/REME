@@ -870,7 +870,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							nodeType = "SF6DETAIL"
 						elif textureType == "Body_DetailBlendMask":
 							nodeType = "SF6BODYDETAIL"
-						elif textureType == "Face_DetailBlendMask":
+						elif textureType == "Face_DetailMapBlendMask":
 							nodeType = "SF6FACEDETAIL"
 						else:
 							nodeType = "UNKN"
