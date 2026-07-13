@@ -261,6 +261,10 @@ sf6DetailNormalTypeSet = set([
 	"WrinkledMap",
 ])
 
+sf6FacialWrinkleTypeSet =  {
+	"FacialWrinkleMap",
+}
+
 usedTextureSet.update(albedoVertexColorTypeSet)
 usedTextureSet.update(normalVertexColorTypeSet)
 usedTextureSet.update(albedoTypeSet)
@@ -782,9 +786,14 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if "_ALB" in texture:
 						autoDetectedAlbedo = True
 						detectedAlbedo = True
-				if gameName == "SF6" and textureType not in usedTextureSet and not autoDetectedAlbedo:
+				
+				isUsedTexture = textureType in usedTextureSet or (
+					gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet
+				)
+				if gameName == "SF6" and not isUsedTexture and not autoDetectedAlbedo:
 					print(f"[SF6 MDF] skipped texture binding: material={materialName}, type={textureType}, path={texture}")
-				if loadUnusedTextures or textureType in usedTextureSet or autoDetectedAlbedo:
+
+				if loadUnusedTextures or isUsedTexture or autoDetectedAlbedo:
 					baseTexturePath = texture.replace("@","").replace(".tex","").replace('/',os.sep)
 					outputPath = os.path.join(TEXTURE_CACHE_DIR,baseTexturePath+".png")
 					
@@ -864,7 +873,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						textureNodeInfoList.append(("OCTD",textureType,imageList,outputPath))
 					elif textureType in SCOTTypes:
 						textureNodeInfoList.append(("SCOT",textureType,imageList,outputPath))
-						
+					
+					elif gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet:
+						textureNodeInfoList.append(
+							("SF6WRINKLE", textureType, imageList, outputPath)
+						)
+
 					elif gameName == "SF6" and textureType in sf6DetailMaskTypeSet:
 						if textureType == "Cloth_DetailMask":
 							nodeType = "SF6DETAIL"
@@ -1000,9 +1014,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					raiseWarning(f"Failed to create {textureType} node on {materialName}: {str(err)}")
 			try:
 				for (nodeType,textureType,_,_) in textureNodeInfoList:
-					#Loop through node list again once all image nodes are added
-					if nodeType != "UNKN" and textureType in nodes:
+					# Wrinkles must be added after all regular normal layers
+					if nodeType not in {"UNKN", "SF6WRINKLE"} and textureType in nodes:
 						addTextureNode(blenderMaterial.node_tree, nodeType, textureType, matInfo)
+
+				if gameName == "SF6" and "FacialWrinkleMap" in matInfo["textureNodeDict"]:
+					addTextureNode(blenderMaterial.node_tree, "SF6WRINKLE", "FacialWrinkleMap", matInfo)
 			except Exception as err:
 				raiseWarning(f"Material Importing Failed ({str(materialName)}). Error During Texture Node Assignment.\nIf you're on the latest version of RE Mesh Editor, please report this error.")
 				traceback.print_exception(type(err), err, err.__traceback__)

@@ -1697,6 +1697,113 @@ def newSF6FaceDetailNode(nodeTree, textureType, matInfo):
 	matInfo["_sf6FaceDetailBuilt"] = True
 	return imageNode
 
+def newSF6FacialWrinkleNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if (matInfo["gameName"] != "SF6" or matInfo.get("_sf6FacialWrinkleBuilt", False)):
+		return imageNode
+	
+	image = getattr(imageNode, "image", None)
+	if image is None:
+		return imageNode
+	
+	matInfo["_sf6FacialWrinkleBuilt"] = True
+	image.colorspace_settings.name = "Non-Color"
+
+	decodeNode = getBentNormalNodeGroup(nodeTree)
+	decodeNode.location = addLoc(imageNode, (300, 0))
+	nodeTree.links.new(imageNode.outputs["Color"], decodeNode.inputs["Color"])
+	nodeTree.links.new(imageNode.outputs["Alpha"], decodeNode.inputs["Alpha"])
+
+	strengthNode = nodeTree.nodes.new("ShaderNodeValue")
+	strengthNode.name = "SF6 Facial Wrinkle Preview Strength"
+	strengthNode.label = strengthNode.name
+	strengthNode.location = addLoc(imageNode, (300, -220))
+	strengthNode.outputs["Value"].default_value = 0.0
+
+	deltaNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+	deltaNode.operation = "SUBTRACT"
+	deltaNode.location = addLoc(imageNode, (600, 0))
+	deltaNode.inputs[1].default_value = (0.5, 0.5, 1.0)
+	nodeTree.links.new(decodeNode.outputs["Color"], deltaNode.inputs[0])
+
+	normalLayers = matInfo["normalNodeLayerGroup"]
+	if normalLayers.currentOutSocket is None:
+		neutralNode = nodeTree.nodes.new("ShaderNodeRGB")
+		neutralNode.name = "SF6 Neutral Tangent Normal"
+		neutralNode.outputs["Color"].default_value = (0.5, 0.5, 1.0, 1.0)
+		normalLayers.addMixLayer(neutralNode.outputs["Color"])
+	
+	scaledDeltaNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+	scaledDeltaNode.operation = "SCALE"
+	scaledDeltaNode.location = addLoc(imageNode, (900, 0))
+	nodeTree.links.new(deltaNode.outputs["Vector"], scaledDeltaNode.inputs["Vector"])
+	nodeTree.links.new(strengthNode.outputs["Value"], scaledDeltaNode.inputs["Scale"])
+
+	normalLayers.addMixLayer(
+		scaledDeltaNode.outputs["Vector"],
+		mixType="ADD",
+		mixFactor=1.0,
+	)
+
+	roughnessLayers = matInfo["roughnessNodeLayerGroup"]
+	if roughnessLayers.currentOutSocket is not None:
+		roughnessDeltaNode = nodeTree.nodes.new("ShaderNodeMath")
+		roughnessDeltaNode.operation = "SUBTRACT"
+		roughnessDeltaNode.location = addLoc(imageNode, (900, -220))
+		roughnessDeltaNode.inputs[1].default_value = 0.502
+		nodeTree.links.new(decodeNode.outputs["Roughness"], roughnessDeltaNode.inputs[0])
+
+		scaledRoughnessNode = nodeTree.nodes.new("ShaderNodeMath")
+		scaledRoughnessNode.operation = "MULTIPLY"
+		scaledRoughnessNode.location = addLoc(imageNode, (1200, -220))
+		nodeTree.links.new(roughnessDeltaNode.outputs["Value"], scaledRoughnessNode.inputs[0])
+		nodeTree.links.new(strengthNode.outputs["Value"], scaledRoughnessNode.inputs[1])
+		
+		roughnessLayers.addMixLayer(scaledRoughnessNode.outputs["Value"], mixType="ADD", mixFactor=1.0)
+
+	cavityDeltaNode = nodeTree.nodes.new("ShaderNodeMath")
+	cavityDeltaNode.name = "SF6 Facial Wrinkle Cavity Delta"
+	cavityDeltaNode.operation = "SUBTRACT"
+	cavityDeltaNode.location = addLoc(imageNode, (900, -440))
+	cavityDeltaNode.inputs[1].default_value = 1.0
+	nodeTree.links.new(
+		decodeNode.outputs["BlueChannel"],
+		cavityDeltaNode.inputs[0],
+	)
+
+	scaledCavityNode = nodeTree.nodes.new("ShaderNodeMath")
+	scaledCavityNode.name = "SF6 Facial Wrinkle Cavity Scale"
+	scaledCavityNode.operation = "MULTIPLY"
+	scaledCavityNode.location = addLoc(imageNode, (1200, -440))
+	nodeTree.links.new(
+		cavityDeltaNode.outputs["Value"],
+		scaledCavityNode.inputs[0],
+	)
+	nodeTree.links.new(
+		strengthNode.outputs["Value"],
+		scaledCavityNode.inputs[1],
+	)
+
+	wrinkleCavityNode = nodeTree.nodes.new("ShaderNodeMath")
+	wrinkleCavityNode.name = "SF6 Facial Wrinkle Cavity"
+	wrinkleCavityNode.operation = "ADD"
+	wrinkleCavityNode.use_clamp = True
+	wrinkleCavityNode.location = addLoc(imageNode, (1500, -440))
+	wrinkleCavityNode.inputs[1].default_value = 1.0
+	nodeTree.links.new(
+		scaledCavityNode.outputs["Value"],
+		wrinkleCavityNode.inputs[0],
+	)
+
+	matInfo["cavityNodeLayerGroup"].addMixLayer(
+		wrinkleCavityNode.outputs["Value"],
+		mixType="MULTIPLY",
+		mixFactor=1.0,
+	)
+
+	return imageNode
+
 def newCMASKNode (nodeTree,textureType,matInfo):
 	if matInfo["gameName"] == "SF6":
 		return newSF6MaskNode(nodeTree, textureType, matInfo)
@@ -2037,6 +2144,7 @@ nodeDict = {
 	"SF6DETAIL":newSF6ClothDetailNode,
 	"SF6BODYDETAIL": newSF6BodyDetailNode,
 	"SF6FACEDETAIL": newSF6FaceDetailNode,
+	"SF6WRINKLE": newSF6FacialWrinkleNode,
 	}
 def addTextureNode(nodeTree,nodeType,textureType,matInfo):
 	#print(nodeType)
