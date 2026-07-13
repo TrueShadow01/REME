@@ -633,6 +633,12 @@ def parseLODStructure(
 		# BLEND SHAPES - submesh
 		currentBlendShapeNameIndex = 0
 		currentBlendDeltaOffset = 0
+		# Lower LOD delta offsets (LOD1, LOD2, etc.)
+		if (blendShapeLODData is not None and blendShapeLODData.blendTargetList):
+			firstBlendTarget = blendShapeLODData.blendTargetList[0]
+			if firstBlendTarget.subMeshEntryList:
+				currentBlendDeltaOffset = (firstBlendTarget.subMeshEntryList[0].vertOffset)
+
 		# Wilds path: deltas were decoded up front from the streaming buffer tails.
 		# Use the precomputed per-LOD dict and skip the legacy (SF6/earlier) decode.
 		if wildsBlendShapeDict is not None:
