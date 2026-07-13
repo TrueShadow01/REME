@@ -521,12 +521,13 @@ def findSF6CMDUserPath(meshPath, cmdIndex=1, costumeIndex=None):
 	meshDir = os.path.dirname(meshRoot)
 	meshCostumeDir = os.path.dirname(meshDir)
 	characterDir = os.path.dirname(meshCostumeDir)
-	characterName = os.path.basename(os.path.dirname(characterDir))
+	characterName = os.path.basename(characterDir)
+	meshCostumeName = os.path.basename(meshCostumeDir)
 
-	if costumeIndex is None:
-		costumeName = os.path.basename(meshCostumeDir)
-	else:
+	if meshCostumeName == "000" and costumeIndex is not None:
 		costumeName = str(costumeIndex).zfill(3)
+	else:
+		costumeName = meshCostumeName
 
 	cmdNumber = str(cmdIndex).zfill(3)
 	cmdSuffix = f"_cmd_{cmdNumber}.user.2"
