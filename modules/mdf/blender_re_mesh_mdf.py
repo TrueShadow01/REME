@@ -2160,6 +2160,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							links.new(matInfo["subsurfaceSocket"], sssMultNode.inputs[0])
 							sssMultNode.inputs[1].default_value = 0.18
 							links.new(sssMultNode.outputs["Value"], nodeBSDF.inputs["Subsurface Weight"])
+							if "Subsurface Radius" in nodeBSDF.inputs:
+								nodeBSDF.inputs["Subsurface Radius"].default_value = (1.0, 0.35, 0.2)
+							
+							if "Subsurface Scale" in nodeBSDF.inputs:
+								nodeBSDF.inputs["Subsurface Scale"].default_value = 0.01
 				#Mix Shaders
 				
 				currentPos = [nodeBSDF.location[0]+300,nodeBSDF.location[1]]
