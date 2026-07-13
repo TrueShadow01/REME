@@ -879,14 +879,40 @@ def parseLODStructure(
 					  submesh.blendShapeList.append(blendShapeEntry)
 				  #blendShapeDict[identifier] = shapeList
 				  """
-				if meshInfo.vertexStartIndex in blendShapeDict:
-					submesh.blendShapeList.extend(
-						blendShapeDict[meshInfo.vertexStartIndex]
-					)
-					if wildsBlendShapeDict is not None:
-						submesh.wildsBlendMeta = reMesh.wildsBlendMeta.get(
-							lodIndex, {}
-						).get(meshInfo.vertexStartIndex)
+				if wildsBlendShapeDict is not None:
+					if meshInfo.vertexStartIndex in blendShapeDict:
+						submesh.blendShapeList.extend(blendShapeDict[meshInfo.vertexStartIndex])
+						submesh.wildsBlendMeta = reMesh.wildsBlendMeta.get(lodIndex, {}).get(meshInfo.vertexStartIndex)
+				else:
+					meshStart = meshInfo.vertexStartIndex
+					meshEnd = bufferEnd
+					localShapeDict = {}
+
+					for blendStart, sourceEntries in blendShapeDict.items():
+						for sourceEntry in sourceEntries:
+							sourceDeltas = np.asarray(sourceEntry.deltas)
+							blendEnd = blendStart + len(sourceDeltas)
+
+							overlapStart = max(meshStart, blendStart)
+							overlapEnd = min(meshEnd, blendEnd)
+							if overlapStart >= overlapEnd:
+								continue
+
+							localEntry = localShapeDict.get(sourceEntry.blendShapeName)
+							if localEntry is None:
+								localEntry = BlendShape()
+								localEntry.blendShapeName = (sourceEntry.blendShapeName)
+								localEntry.deltas = np.zeros((meshEnd - meshStart, 3), dtype=np.float32)
+
+								localShapeDict[sourceEntry.blendShapeName] = localEntry
+							
+							sourceOffset = overlapStart - blendStart
+							localOffset = overlapStart - meshStart
+							overlapCount = overlapEnd - overlapStart
+
+							localEntry.deltas[localOffset : localOffset + overlapCount] = sourceDeltas[sourceOffset : sourceOffset + overlapCount]
+						
+					submesh.blendShapeList.extend(localShapeDict.values())
 				group.subMeshList.append(submesh)
 			lod.visconGroupList.append(group)
 		lodList.append(lod)
