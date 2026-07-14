@@ -57,6 +57,115 @@ timeFormat = "%d"
 rotateNeg90Matrix = Matrix.Rotation(radians(-90.0), 4, "X")
 rotate90Matrix = Matrix.Rotation(radians(90.0), 4, "X")
 
+# create compact numeric literals for blender driver expression
+def _formatSF6DriverValue(value):
+    return f"{value:.9g}"
+
+
+def buildSF6JCNSDriverExpression(recordList):
+    """
+    Convert the JCNS records for one shape key into a Blender driver.
+
+    Each supported condition becomes one driver variable named v0, v1, etc.
+    Conditions within one record are added together.
+    When one JCNS output is represented by multiple records then those record results are multiplied.
+
+    Returns:
+        expression: Blender scripted driver expression
+        conditionList: Conditions in the same order as the driver variables
+    """
+    conditionList = []
+    recordExpressionList = []
+
+    for record in recordList:
+        # Holds every one-dimensional bone angle curve in this record
+        conditionExpressionList = []
+
+        for condition in record.conditionList:
+            # Mode 1 and 3 use ordinary local Euler rotation channels.
+            # Mode 0 is only used by PointCons entries and needs separate transform space handling,
+            # skipped for now
+            if condition.curveModeRaw not in (1, 3):
+                continue
+
+            # driver installer creates transform variables with this name
+            # and target the condition's bone and rotation axis
+            variableName = f"v{len(conditionList)}"
+            conditionList.append(condition)
+
+            # JCNS stores three angle-to-weight control points.
+            # Their stored order is not always numerically ascending, sort the complete pairs,
+            # without separating an angle from its corresponding weight
+            points = sorted(zip(condition.inputValues, condition.outputValues), key=lambda point: point[0])
+            (x0, y0), (x1, y1), (x2, y2) = points
+
+            # JCNS angles are degrees, Blender transform-driver rotation variable returns radians
+            # Convert authored control points to radians
+            x0 = radians(x0)
+            x1 = radians(x1)
+            x2 = radians(x2)
+
+            # Convert numbers to compact strings before assembling the driver
+            x0Text = _formatSF6DriverValue(x0)
+            x1Text = _formatSF6DriverValue(x1)
+            x2Text = _formatSF6DriverValue(x2)
+            y0Text = _formatSF6DriverValue(y0)
+            y1Text = _formatSF6DriverValue(y1)
+            y2Text = _formatSF6DriverValue(y2)
+
+            # All 3 angles occupy the same point.
+            # There is no interval to interpolate, use the first stored output directly
+            if x0 == x2:
+                expression = y0Text
+            
+            # lower 2 points share an angle.
+            # Keep y0 at and below the boundary then interpolate from the second point to the upper point.
+            # This also avoids dividing by x1 - x0 which is zero
+            elif x0 == x1:
+                expression = (
+                    f"({y0Text} if {variableName}<={x0Text} else "
+                    f"{y2Text} if {variableName}>={x2Text} else "
+                    f"{y1Text}+({y2Text}-{y1Text})*"
+                    f"({variableName}-{x1Text})/({x2Text}-{x1Text}))"
+                )
+
+            # upper 2 points share an angle.
+            # Interpolate from the lower point to the middle output then use y2 at and beyond the upper boundary.
+            # This avoids division by x2 - x1
+            elif x1 == x2:
+                expression = (
+                    f"({y0Text} if {variableName}<={x0Text} else "
+                    f"{y2Text} if {variableName}>={x2Text} else "
+                    f"{y0Text}+({y1Text}-{y0Text})*"
+                    f"({variableName}-{x0Text})/({x1Text}-{x0Text}))"
+                )
+
+            # Normal 3 point curve
+            # Hold y0 below the lower angle
+            # Interpolate from point 0 to point 1
+            # Interpolate from point 1 to point 2
+            # Hold y2 above the upper angle
+            else:
+                expression = (
+                    f"({y0Text} if {variableName}<={x0Text} else "
+                    f"{y2Text} if {variableName}>={x2Text} else "
+                    f"{y0Text}+({y1Text}-{y0Text})*"
+                    f"({variableName}-{x0Text})/({x1Text}-{x0Text}) "
+                    f"if {variableName}<{x1Text} else "
+                    f"{y1Text}+({y2Text}-{y1Text})*"
+                    f"({variableName}-{x1Text})/({x2Text}-{x1Text}))"
+                )
+
+            conditionExpressionList.append(expression)
+        
+        # Conditions inside a record contribute additively.
+        # Parentheses preserve that sum when multiple records are later multiplied
+        if conditionExpressionList:
+            recordExpressionList.append("(" + "+".join(conditionExpressionList) + ")")
+    
+    # Repeated records describe combined bone requirements for the same output.
+    # The returned condition order must match v0, v1, ... during installation
+    return "*".join(recordExpressionList), conditionList
 
 def triangulateMesh(mesh):
     # BMesh triangulation screws up normals, so save them and reset them after triangulation
