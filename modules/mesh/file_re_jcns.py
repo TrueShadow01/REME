@@ -67,15 +67,15 @@ def _validateHash(name, storedHash, label):
     
 def _readHeader(data):
     _requireRange(data, 0, JCNS_HEADER_SIZE, "JCNS header")
-    version = _unpack(data, "<I", 0x00, "JCNS version")
-    magic = _unpack(data, "<4s", 0x04, "JCNS magic")
+    version, = _unpack(data, "<I", 0x00, "JCNS version")
+    magic, = _unpack(data, "<4s", 0x04, "JCNS magic")
     if version != JCNS_VERSION or magic != JCNS_MAGIC:
         raise JCNSParseError(f"Unsupported JCNS header: version={version}, magic={magic}")
     
     backingOffset, recordOffset = _unpack(data, "<QQ", 0x50, "record offsets")
-    footerOffset = _unpack(data, "<Q", 0x60, "footer offset")
+    footerOffset, = _unpack(data, "<Q", 0x60, "footer offset")
     footerOffsetCopy, graphOffset = _unpack(data, "<QQ", 0x90, "footer and graph offsets")
-    recordCount, outputCount = _unpack(data, "<HH", 0xA2, "record counts")
+    recordCount, outputCount = _unpack(data, "<HI", 0xA2, "record counts")
 
     if backingOffset != JCNS_HEADER_SIZE:
         raise JCNSParseError("JCNS has an invalid backing offset")
@@ -84,6 +84,20 @@ def _readHeader(data):
     if any(offset % 0x10 for offset in (backingOffset, recordOffset, footerOffset, graphOffset) if offset):
         raise JCNSParseError("JCNS contains an unaligned section offset")
     
+    if recordCount:
+        if recordOffset != backingOffset:
+            raise JCNSParseError("JCNS record offsets do not match")
+        if not 0 < outputCount <= recordCount:
+            raise JCNSParseError("JCNS has inconsistent record counts")
+        if not graphOffset:
+            raise JCNSParseError("JCNS dependency table is missing")
+        if recordOffset + recordCount * JCNS_RECORD_SIZE > graphOffset:
+            raise JCNSParseError("JCNS record table overlaps later data")
+        if graphOffset + outputCount * 0x10 > footerOffset:
+            raise JCNSParseError("JCNS dependency table overlaps the footer")
+    elif recordOffset or graphOffset or outputCount:
+        raise JCNSParseError("Empty JCNS contains populated table fields")
+
     _requireRange(data, recordOffset, recordCount * JCNS_RECORD_SIZE, "record table")
     _requireRange(data, footerOffset, 0x14, "footer")
 
@@ -95,10 +109,10 @@ def _readHeader(data):
     return recordOffset, graphOffset, recordCount, outputCount
 
 def _readCondition(data, conditionOffset, label):
-    boneNameOffset = _unpack(data, "<Q", conditionOffset + 0x08, f"{label} bone name pointer")
-    boneHash = _unpack(data, "<I", conditionOffset + 0x10, f"{label} bone hash")
+    boneNameOffset, = _unpack(data, "<Q", conditionOffset + 0x08, f"{label} bone name pointer")
+    boneHash, = _unpack(data, "<I", conditionOffset + 0x10, f"{label} bone hash")
     flagA, curveModeRaw, axis, flagB = _unpack(data, "<4B", conditionOffset + 0x18, f"{label} metadata")
-    conditionFlags = _unpack(data, "<I", conditionOffset + 0x1C, f"{label} flags")
+    conditionFlags, = _unpack(data, "<I", conditionOffset + 0x1C, f"{label} flags")
     if axis > 2:
         raise JCNSParseError(f"{label} has invalid axis {axis}")
     
