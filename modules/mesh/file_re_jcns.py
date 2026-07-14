@@ -18,7 +18,7 @@ class JCNSCondition:
     boneName: str
     boneHash: int
     axis: int
-    mode: int
+    curveModeRaw: int
     flags: tuple
     inputValues: tuple
     outputValues: tuple
@@ -72,32 +72,33 @@ def _readHeader(data):
     if version != JCNS_VERSION or magic != JCNS_MAGIC:
         raise JCNSParseError(f"Unsupported JCNS header: version={version}, magic={magic}")
     
-    tableOffset, tableOffsetCopy = _unpack(data, "<QQ", 0x50, "record offsets")
+    backingOffset, recordOffset = _unpack(data, "<QQ", 0x50, "record offsets")
     footerOffset = _unpack(data, "<Q", 0x60, "footer offset")
     footerOffsetCopy, graphOffset = _unpack(data, "<QQ", 0x90, "footer and graph offsets")
     recordCount, outputCount = _unpack(data, "<HH", 0xA2, "record counts")
 
+    if backingOffset != JCNS_HEADER_SIZE:
+        raise JCNSParseError("JCNS has an invalid backing offset")
     if footerOffset != footerOffsetCopy:
         raise JCNSParseError("JCNS footer offsets do not match")
-    if recordCount and tableOffset != tableOffsetCopy:
-        raise JCNSParseError("JCNS record offsets do not match")
-    if not recordCount and tableOffsetCopy not in (0, tableOffset):
-        raise JCNSParseError("Empty JCNS has an invalid record offset")
+    if any(offset % 0x10 for offset in (backingOffset, recordOffset, footerOffset, graphOffset) if offset):
+        raise JCNSParseError("JCNS contains an unaligned section offset")
     
-    _requireRange(data, tableOffset, recordCount * JCNS_RECORD_SIZE, "record table")
-    _requireRange(data, footerOffset, 0, "footer")
+    _requireRange(data, recordOffset, recordCount * JCNS_RECORD_SIZE, "record table")
+    _requireRange(data, footerOffset, 0x14, "footer")
 
+    if footerOffset + 0x14 != len(data):
+        raise JCNSParseError("JCNS footer is not at the end of the file")
     if outputCount:
-        _requireRange(data, graphOffset, outputCount * 0.10, "dependency table")
-    elif graphOffset:
-        raise JCNSParseError("Empty JCNS has a dependency table offset")
+        _requireRange(data, graphOffset, outputCount * 0x10, "dependency table")
 
-    return tableOffset, graphOffset, recordCount, outputCount
+    return recordOffset, graphOffset, recordCount, outputCount
 
 def _readCondition(data, conditionOffset, label):
     boneNameOffset = _unpack(data, "<Q", conditionOffset + 0x08, f"{label} bone name pointer")
-    boneHash = _unpack(data, "<I", conditionOffset * 0x10, f"{label} bone hash")
-    flagA, mode, axis, flagB = _unpack(data, "<4B", conditionOffset * 0x18, f"{label} metadata")
+    boneHash = _unpack(data, "<I", conditionOffset + 0x10, f"{label} bone hash")
+    flagA, curveModeRaw, axis, flagB = _unpack(data, "<4B", conditionOffset + 0x18, f"{label} metadata")
+    conditionFlags = _unpack(data, "<I", conditionOffset + 0x1C, f"{label} flags")
     if axis > 2:
         raise JCNSParseError(f"{label} has invalid axis {axis}")
     
@@ -105,11 +106,11 @@ def _readCondition(data, conditionOffset, label):
     _validateHash(boneName, boneHash, f"{label} bone")
     inputValues = _unpack(data, "<3f", conditionOffset + 0x20, f"{label} inputs")
     outputValues = _unpack(data, "<3f", conditionOffset + 0x2C, f"{label} outputs")
-    tailValues = _unpack(data, "<4f", conditionOffset + 0x30, f"{label} tail")
+    tailValues = _unpack(data, "<4f", conditionOffset + 0x38, f"{label} tail")
 
     if not all(math.isfinite(value) for value in inputValues + outputValues):
         raise JCNSParseError(f"{label} contains non-finite curve data")
     if tailValues != (0.0, 0.0, 0.0, 1.0):
         raise JCNSParseError(f"{label} has an unsupported condition tail")
     
-    return JCNSCondition(boneName, boneHash, axis, mode, (flagA, flagB), inputValues, outputValues)
+    return JCNSCondition(boneName, boneHash, axis, curveModeRaw, (flagA, flagB, conditionFlags), inputValues, outputValues)
