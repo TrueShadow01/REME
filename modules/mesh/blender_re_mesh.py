@@ -17,6 +17,7 @@ from ..mdf.blender_re_mdf import importMDFFile
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.file_re_mdf import readMDF
 from ..sfur.blender_re_sfur import findSFurPathFromMeshPath, importSFurFile
+from .file_re_jcns import JCNSParseError, findJCNSPath, readJCNS
 from .file_re_mesh import (
     AABB,
     EXPORT_WILDS_BLEND_SHAPES,
@@ -903,6 +904,42 @@ def importREMeshFile(filePath, options):
     meshParseEndTime = time.time()
     meshParseTime = meshParseEndTime - meshParseStartTime
     print(f"Mesh parsing took {timeFormat % (meshParseTime * 1000)} ms.")
+    sf6JCNSData = None
+    if gameName == "SF6" and options.get("importBlendShapes", False):
+        meshBlendShapeNames = {
+            blendShape.blendShapeName 
+            for lod in parsedMesh.mainMeshLODList
+            for visconGroup in lod.visconGroupList
+            for subMesh in visconGroup.subMeshList
+            for blendShape in subMesh.blendShapeList
+        }
+
+        if meshBlendShapeNames:
+            jcnsPath = findJCNSPath(filePath)
+            if jcnsPath is None:
+                print("[SF6 JCNS] No matching JCNS file found")
+            else:
+                try:
+                    sf6JCNSData = readJCNS(jcnsPath)
+                    jcnsOutputNames = {
+                        record.outputName
+                        for record in sf6JCNSData.recordList
+                    }
+                    matchedNames = meshBlendShapeNames & jcnsOutputNames
+
+                    print(f"[SF6 JCNS] Using {jcnsPath}")
+                    print(
+                        f"[SF6 JCNS] Parsed "
+                        f"{len(sf6JCNSData.recordList)} records, "
+                        f"{len(jcnsOutputNames)} unique outputs; "
+                        f"matched {len(matchedNames)}/"
+                        f"{len(meshBlendShapeNames)} imported blend shapes"
+                    )
+                except JCNSParseError as error:
+                    message = f"Could not parse SF6 JCNS file: {error}"
+                    print(f"[SF6 JCNS] {message}")
+                    warningList.append(message)
+
     mdfPath = None
     mdfFile = None
 
