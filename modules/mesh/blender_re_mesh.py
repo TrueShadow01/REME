@@ -381,6 +381,7 @@ def importMesh(
     rotate90=True,
     blendShapeList=[],
     blendMeta=None,
+    preserveRawBlendShapeNames=False,
 ):
     # print(f"\n{meshName}, Vertex Count: {len(vertexList)}, Face Count: {len(faceList)}\n")
     # print(vertexList)
@@ -584,7 +585,7 @@ def importMesh(
         rot3 = rotate90Matrix.to_3x3() if rotate90 else None
         for blendShapeEntry in blendShapeList:
             rawName = blendShapeEntry.blendShapeName
-            name = cleanShapeKeyName(rawName)
+            name = rawName if preserveRawBlendShapeNames else cleanShapeKeyName(rawName)
             if rot3 is not None:
                 deltas = [rot3 @ Vector(val) for val in blendShapeEntry.deltas]
             else:
@@ -617,6 +618,7 @@ def importLODGroup(
     rotate90=True,
     mergeGroups=False,
     importBoundingBoxes=False,
+    preserveRawBlendShapeNames=False,
 ):
 
     if meshType == "Main Mesh":
@@ -706,6 +708,7 @@ def importLODGroup(
                         rotate90=rotate90,
                         blendShapeList=subMesh.blendShapeList,
                         blendMeta=subMesh.wildsBlendMeta,
+                        preserveRawBlendShapeNames=preserveRawBlendShapeNames,
                     )
                     if parsedMesh.isMPLY:
                         meshObj.parent = MPLYRoot
@@ -1015,6 +1018,7 @@ def importREMeshFile(filePath, options):
             options["rotate90"],
             options["mergeGroups"],
             options["importBoundingBoxes"],
+            preserveRawBlendShapeNames=sf6JCNSData is not None,
         )
         # print("DEBUG: Finished importing main mesh")
     """
