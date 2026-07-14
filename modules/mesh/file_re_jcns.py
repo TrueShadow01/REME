@@ -153,5 +153,49 @@ def _readRecord(data, recordOffset, recordIndex):
     for conditionIndex in range(conditionCount):
         currentOffset = (conditionOffset + conditionIndex * JCNS_CONDITION_SIZE)
         record.conditionList.append(_readCondition(data, currentOffset, f"{label} condition {conditionIndex}"))
-        
+
     return record
+
+def _readDependencyTable(data, graphOffset, outputCount, outputHashSet):
+    dependencyHashDict = {}
+
+    for graphIndex in range(outputCount):
+        label = f"dependency {graphIndex}"
+        entryOffset = graphOffset + graphIndex * 0x10
+        dependencyOffset, sourceCount = _unpack(data, "<QQ", entryOffset, f"{label} entry")
+
+        if not dependencyOffset:
+            raise JCNSParseError(f"{label} has no hash list pointer")
+        
+        _requireRange(data, dependencyOffset, 4 + sourceCount * 4, f"{label} hashes")
+        outputHash, = _unpack(data, "<I", dependencyOffset, f"{label} output hash")
+
+        if outputHash not in outputHashSet:
+            raise JCNSParseError(f"{label} references unknown output 0x{outputHash:08X}")
+        if outputHash in dependencyHashDict:
+            raise JCNSParseError(f"{label} duplicates output 0x{outputHash:08X}")
+        
+        if sourceCount:
+            sourceHashes = _unpack(data, f"<{sourceCount}I", dependencyOffset + 4, f"{label} source hashes")
+        else:
+            sourceHashes = ()
+        
+        dependencyHashDict[outputHash] = sourceHashes
+    return dependencyHashDict
+
+def readJCNS(filePath):
+    try:
+        with open(filePath, "rb") as file:
+            data = file.read()
+    except OSError as error:
+        raise JCNSParseError(f"Failed to open JCNS file: {filePath}") from error
+    
+    recordOffset, graphOffset, recordCount, outputCount = _readHeader(data)
+    recordList = [_readRecord(data, recordOffset + recordIndex * JCNS_RECORD_SIZE, recordIndex) for recordIndex in range(recordCount)]
+
+    outputHashSet = {record.outputHash for record in recordList}
+    if len(outputHashSet) != outputCount:
+        raise JCNSParseError("JCNS unique output count does not match its records")
+    
+    dependencyHashDict = _readDependencyTable(data, graphOffset, outputCount, outputHashSet)
+    return JCNSFile(filePath, recordList, dependencyHashDict)
