@@ -620,6 +620,7 @@ def parseLODStructure(
 	lodList = []
 	currentBlendShapeOffset = 0
 	blendShapeDict = {}
+	currentBlendShapeNameIndex = 0
 	for lodIndex, lodGroup in enumerate(targetLODList):
 		# BLEND SHAPES - LOD level
 		if (
@@ -631,7 +632,6 @@ def parseLODStructure(
 			blendShapeLODData = None
 
 		# BLEND SHAPES - submesh
-		currentBlendShapeNameIndex = 0
 		currentBlendDeltaOffset = 0
 		# Lower LOD delta offsets (LOD1, LOD2, etc.)
 		if (blendShapeLODData is not None and blendShapeLODData.blendTargetList):
