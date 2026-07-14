@@ -28,6 +28,7 @@ class JCNSRecord:
     outputName: str
     outputHash: int
     conditionList: list = field(default_factory=list)
+    rawMetadata: bytes = b""
 
 @dataclass
 class JCNSFile:
@@ -128,3 +129,29 @@ def _readCondition(data, conditionOffset, label):
         raise JCNSParseError(f"{label} has an unsupported condition tail")
     
     return JCNSCondition(boneName, boneHash, axis, curveModeRaw, (flagA, flagB, conditionFlags), inputValues, outputValues)
+
+def _readRecord(data, recordOffset, recordIndex):
+    label = f"record {recordIndex}"
+    conditionOffset, = _unpack(data, "<Q", recordOffset + 0x08, f"{label} condition pointer")
+    outputNameOffset, = _unpack(data, "<Q", recordOffset + 0x10, f"{label} output name pointer")
+    outputHash, = _unpack(data, "<I", recordOffset + 0x20, f"{label} output hash")
+    conditionCount, = _unpack(data, "<B", recordOffset + 0x29, f"{label} condition count")
+
+    if conditionCount:
+        if not conditionOffset:
+            raise JCNSParseError(f"{label} has no condition pointer")
+        _requireRange(data, conditionOffset, conditionCount * JCNS_CONDITION_SIZE, f"{label} condition block")
+    elif conditionOffset:
+        raise JCNSParseError(f"{label} has a condition pointer but no conditions")
+    
+    outputName = _readUTF16(data, outputNameOffset, f"{label} output name")
+    _validateHash(outputName, outputHash, f"{label} output")
+
+    record = JCNSRecord(outputName, outputHash)
+    record.rawMetadata = data[recordOffset + 0x28:recordOffset + JCNS_RECORD_SIZE]
+
+    for conditionIndex in range(conditionCount):
+        currentOffset = (conditionOffset + conditionIndex * JCNS_CONDITION_SIZE)
+        record.conditionList.append(_readCondition(data, currentOffset, f"{label} condition {conditionIndex}"))
+        
+    return record
