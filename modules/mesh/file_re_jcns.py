@@ -1,4 +1,7 @@
+# Author: TrueShadow01
+
 import math
+import os
 import struct
 from dataclasses import dataclass, field
 
@@ -199,3 +202,36 @@ def readJCNS(filePath):
     
     dependencyHashDict = _readDependencyTable(data, graphOffset, outputCount, outputHashSet)
     return JCNSFile(filePath, recordList, dependencyHashDict)
+
+def findJCNSPath(meshFilePath):
+    if not meshFilePath:
+        return None
+    
+    fileName = os.path.basename(meshFilePath)
+    meshMarkerIndex = fileName.lower().find(".mesh")
+    if meshMarkerIndex == -1:
+        return None
+    
+    meshBaseName = fileName[:meshMarkerIndex]
+    meshDirectory = os.path.dirname(meshFilePath)
+    directoryName = os.path.basename(meshDirectory)
+
+    # Meshes normally live under numbered component dir
+    # e.g. 00, 01, 02, JCNS files sit one dir above
+    if len(directoryName) == 2 and directoryName.isdigit():
+        jcnsDirectory = os.path.dirname(meshDirectory)
+    else:
+        jcnsDirectory = meshDirectory
+    
+    exactPath = os.path.join(jcnsDirectory, f"{meshBaseName}_drv_bs1.jcns.22")
+    if os.path.isfile(exactPath):
+        return exactPath
+    
+    # some use a shared JCNS file for head, body and other component meshes
+    nameParts = meshBaseName.rsplit("_", 1)
+    if (len(nameParts) == 2 and len(nameParts[1]) == 2 and nameParts[1].isdigit()):
+        sharedPath = os.path.join(jcnsDirectory, f"{nameParts[0]}_drv_bs1.jcns.22")
+        if os.path.isfile(sharedPath):
+            return sharedPath
+    
+    return None
