@@ -1216,8 +1216,8 @@ def importREMeshFile(filePath, options):
             if obj.type == "MESH" and obj.name not in existingObjectNameSet
         }
 
-        if sf6JCNSData is not None:
-            installSF6JCNSDrivers(sf6JCNSData, importedMeshObjectList, armatureObj)
+        #if sf6JCNSData is not None:
+        #    installSF6JCNSDrivers(sf6JCNSData, importedMeshObjectList, armatureObj)
 
         # print("DEBUG: Finished importing main mesh")
     """
