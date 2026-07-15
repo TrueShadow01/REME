@@ -1191,6 +1191,7 @@ def importREMeshFile(filePath, options):
     meshOffsetDict = dict()
 
     if not options["importArmatureOnly"]:
+        existingObjectNameSet = set(bpy.data.objects.keys())
         # print("DEBUG: Importing main mesh")
         importLODGroup(
             parsedMesh,
@@ -1208,6 +1209,16 @@ def importREMeshFile(filePath, options):
             options["importBoundingBoxes"],
             preserveRawBlendShapeNames=sf6JCNSData is not None,
         )
+        # collect only meshes created by this import.
+        importedMeshObjectList = {
+            obj
+            for obj in bpy.data.objects
+            if obj.type == "MESH" and obj.name not in existingObjectNameSet
+        }
+
+        if sf6JCNSData is not None:
+            installSF6JCNSDrivers(sf6JCNSData, importedMeshObjectList, armatureObj)
+
         # print("DEBUG: Finished importing main mesh")
     """
     if options["importShadowMeshes"] and parsedMesh.shadowMeshLODList != []:
