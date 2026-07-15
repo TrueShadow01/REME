@@ -50,21 +50,22 @@ SF6 Color Index: 1
 ```
 
 ## Known Limitations
-- Blender 5.1 is not supported
-- Monster Hunter Wilds support is experimental and needs broader testing
-- Blend-shape / shape-key import support varies by game and mesh format
-- Legacy blend-shape import has been improved but regression testing across older titles is still needed
-- Blend-shape export is not guaranteed for all supported import paths
-- Some newer game formats may import but not export correctly
-- Street Fighter 6 material support remains experimental and may vary by fighter, costume and shader
-- Damage, sweat, animated muscle, cloth-wave and some auxiliary SF6 material effects are not reconstructed
-- Blender materials may not reproduce every RE Engine lighting and shader effect exactly
-- Material reconstruction may differ from in-game rendering
+- Blender 5.1 is not currently supported
+- Monster Hunter Wilds support remains experimental
+- Blend-shape support varies by game and mesh format
+- SF6 blend shapes are kept at zero by default
+- Automatic SF6 JCNS pose-corrective drivers are disabled while their vertex mapping remains experimental
+- Extreme FK poses may not match the game's deformation without pose-corrective shapes
+- The imported skeleton does not include custom IK or animator-facing controls
+- Blend-shape export is not guaranteed for every supported import path
+- Damage, sweat, animated muscle, cloth-wave and some auxiliary SF6 effects are not reconstructed
+- Blender materials cannot reproduce every RE Engine lighting and shader effect exactly
 
 ## Roadmap
 
 ### Near Term
 - Validate Street Fighter 6 materials across more fighters, costumes, color variants and shader types
+- Investigate SF6 blend-shape vertex mapping and safely restore JCNS pose-corrective drivers
 - Add automated regression tests for CMD parsing and material matching
 - Improve remaining SF6 effects such as damage, sweat, animated deformation and specialized transparency
 - Improve texture import reliability and support for newer compression formats
