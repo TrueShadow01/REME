@@ -141,6 +141,111 @@ def buildSF6JCNSDriverExpression(recordList):
     # The returned condition order must match v0, v1, ... during installation
     return "*".join(recordExpressionList), conditionList
 
+def installSF6JCNSDrivers(jcnsData, meshObjectList, armatureObj):
+    """
+    Install JCNS pose drivers on matching raw SF6 shape key names
+
+    Drivers read local XYZ pose bone rotations.
+    Their variables are ordered to match the conditions returned by buildSF6JCNSDriverExpression()
+    """
+    if jcnsData is None or armatureObj is None:
+        return 0
+    
+    # Ensure custom curve evaluator is available after a addon reload
+    bpy.app.driver_namespace["re_sf6c"] = evaluateSF6JCNSCurve
+
+    # 1 output can have multiple records representing combined bone inputs
+    recordDict = {}
+    for record in jcnsData.recordList:
+        recordDict.setdefault(record.outputName, []).append(record)
+
+    transformTypeList = ("ROT_X", "ROT_Y", "ROT_Z")
+    installedDriverCount = 0
+    driverMeshCount = 0
+    unsupportedOutputCount = 0
+    oversizedExpressionCount = 0
+    missingBoneNameSet = set()
+
+    for meshObject in meshObjectList:
+        if meshObject.type != "MESH":
+            continue
+
+        shapeKeyData = meshObject.data.shape_keys
+        if shapeKeyData is None:
+            continue
+
+        meshHasDriver = False
+
+        for outputName, recordList in recordDict.items():
+            shapeKey = shapeKeyData.key_blocks.get(outputName)
+            if shapeKey is None:
+                continue
+
+            expression, conditionList = buildSF6JCNSDriverExpression(recordList)
+
+            # empty expressions are 0 condition records or unsupported mode 0 PointCons conditions
+            if not expression or not conditionList:
+                unsupportedOutputCount += 1
+                continue
+
+            # blender silently truncates expressions longer than 255 characters
+            if len(expression) > 255:
+                oversizedExpressionCount += 1
+                continue
+
+            missingBones = {
+                condition.boneName
+                for condition in conditionList
+                if armatureObj.pose.bones.get(condition.boneName) is None
+            }
+            if missingBones:
+                missingBoneNameSet.update(missingBones)
+                continue
+
+            fcurve = shapeKey.driver_add("value")
+            driver = fcurve.driver
+            driver.type = "SCRIPTED"
+
+            # remove variables left by existing driver on this shape key
+            for variable in list(driver.variables):
+                driver.variables.remove(variable)
+            
+            for conditionIndex, condition in enumerate(conditionList):
+                variable = driver.variables.new()
+                variable.name = f"v{conditionIndex}"
+                variable.type = "TRANSFORMS"
+
+                target = variable.targets[0]
+                target.id = armatureObj
+                target.bone_target = condition.boneName
+                target.transform_type = transformTypeList[condition.axis]
+                target.transform_space = "LOCAL_SPACE"
+                target.rotation_mode = "XYZ"
+
+            driver.expression = expression
+            installedDriverCount += 1
+            meshHasDriver = True
+
+        if meshHasDriver:
+            driverMeshCount += 1
+
+            # these markers will let the exporter later temporaily disable generated drivers instead of baking posed corrections
+            shapeKeyData["re_sf6_jcns_drivers"] = True
+            shapeKeyData["re_sf6_jcns_path"] = jcnsData.filePath
+    
+    print(f"[SF6 JCNS] Installed {installedDriverCount} pose drivers across {driverMeshCount} mesh objects")
+
+    if unsupportedOutputCount:
+        print(f"[SF6 JCNS] Skipped {unsupportedOutputCount} unsupported or 0 condition outputs")
+    
+    if oversizedExpressionCount:
+        print(f"[SF6 JCNS] Skipped {oversizedExpressionCount} expressions exceeding Blender's 255 character limit")
+    
+    if missingBoneNameSet:
+        print("[SF6 JCNS] Missing driver bones: " + ",".join(sorted(missingBoneNameSet)))
+    
+    return installedDriverCount
+
 def triangulateMesh(mesh):
     # BMesh triangulation screws up normals, so save them and reset them after triangulation
     # custom_normals = None
