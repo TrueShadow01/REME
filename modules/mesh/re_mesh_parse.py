@@ -263,11 +263,20 @@ def ReadBlendShapeShortBuffer(blendShapeBuffer, tags):
 	return blendShapeArray
 
 
-def remapBlendShapeDeltas(blendShapeDeltas,aabb):
+def remapBlendShapeDeltas(blendShapeDeltas,aabb,zeroIsSentinel=False):
+	# SF6 uses an all 0 encoded record to mean no vertex delta.
+	# Preserve that mask before applying the target AABB remapping
+	if zeroIsSentinel:
+		zeroDeltaMask = np.all(blendShapeDeltas == 0.0, axis=1)
+
 	blendShapeDeltas = blendShapeDeltas.copy()
 	blendShapeDeltas[:,0] = (aabb.max.x - aabb.min.x) * blendShapeDeltas[:,0] + aabb.min.x
 	blendShapeDeltas[:,1] = (aabb.max.y - aabb.min.y) * blendShapeDeltas[:,1] + aabb.min.y
 	blendShapeDeltas[:,2] = (aabb.max.z - aabb.min.z) * blendShapeDeltas[:,2] + aabb.min.z
+
+	if zeroIsSentinel:
+		blendShapeDeltas[zeroDeltaMask] = 0.0
+
 	return blendShapeDeltas
 
 BlendShapeBufferReadDict = {
@@ -712,7 +721,7 @@ def parseLODStructure(
 						for subMeshEntry in blendTarget.subMeshEntryList:
 							blendShapeEntry = BlendShape()
 							blendShapeEntry.blendShapeName = blendShapeName
-							blendShapeEntry.deltas = remapBlendShapeDeltas(blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+subMeshEntry.vertCount],blendShapeLODData.aabbList[blendTargetIndex])
+							blendShapeEntry.deltas = remapBlendShapeDeltas(blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+subMeshEntry.vertCount],blendShapeLODData.aabbList[blendTargetIndex],zeroIsSentinel=reMesh.meshVersion == VERSION_SF6)
 
 							# blendShapeEntry.deltas[:,0] -= blendShapeLODData.aabbList[blendTargetIndex].max.x
 							# blendShapeEntry.deltas[:,1] -= blendShapeLODData.aabbList[blendTargetIndex].max.y
@@ -733,7 +742,7 @@ def parseLODStructure(
 					else:
 						blendShapeEntry = BlendShape()
 						blendShapeEntry.blendShapeName = blendShapeName
-						blendShapeEntry.deltas = remapBlendShapeDeltas(blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+blendTarget.vertCount],blendShapeLODData.aabbList[blendTargetIndex])
+						blendShapeEntry.deltas = remapBlendShapeDeltas(blendShapeDeltas[currentBlendDeltaOffset:currentBlendDeltaOffset+blendTarget.vertCount],blendShapeLODData.aabbList[blendTargetIndex],zeroIsSentinel=reMesh.meshVersion == VERSION_SF6)
 
 						currentBlendDeltaOffset += blendTarget.vertCount
 						if blendTarget.subMeshVertexStartIndex in blendShapeDict:
