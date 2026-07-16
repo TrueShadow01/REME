@@ -1479,8 +1479,14 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 		matInfo["mPropDict"].get("Wrinkled_NormaBlendlRate") 
 		or matInfo["mPropDict"].get("Wrinkled_NormalBlendRate")
 		)
+	wrinkleOnProp = matInfo["mPropDict"].get("Wrinkled_On")
 
-	if wrinkleNode is not None and wrinkleRateProp is not None:
+	wrinkleIsEnabled = (
+		wrinkleOnProp is None
+		or float(wrinkleOnProp.propValue[0]) > 0.0
+	)
+
+	if (wrinkleNode is not None and wrinkleRateProp is not None and wrinkleIsEnabled):
 		try:
 			wrinkleNode.image.colorspace_settings.name = "Non-Color"
 		except Exception:
@@ -1588,38 +1594,7 @@ def newSF6FurNode(nodeTree, textureType, matInfo):
 	furMaskNode.name = "SF6 Fur Mask"
 	nodeTree.links.new(furMapNode.outputs["Color"], furMaskNode.inputs["Color"])
 
-	deepProp = matInfo["mPropDict"].get("Fur_ColorDeep")
-	frontProp = matInfo["mPropDict"].get("Fur_ColorFront")
-
-	if deepProp is not None and frontProp is not None:
-		deepNode = addPropertyNode(deepProp, matInfo["currentPropPos"], nodeTree)
-		frontNode = addPropertyNode(frontProp, matInfo["currentPropPos"], nodeTree)
-
-		colorMixnode = nodeTree.nodes.new("ShaderNodeMixRGB")
-		colorMixnode.name = "SF6 Fur Depth Color"
-		nodeTree.links.new(furMaskNode.outputs[0], colorMixnode.inputs["Fac"])
-		nodeTree.links.new(deepNode.outputs["Color"], colorMixnode.inputs["Color1"])
-		nodeTree.links.new(frontNode.outputs["Color"], colorMixnode.inputs["Color2"])
-
-		intensityProp = matInfo["mPropDict"].get("Fur_ColorIntensity")
-		if intensityProp is not None:
-			intensityNode = addPropertyNode(intensityProp, matInfo["currentPropPos"], nodeTree)
-
-			intensityMixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
-			intensityMixNode.name = "SF6 Fur Color Intensity"
-			intensityMixNode.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
-
-			nodeTree.links.new(intensityNode.outputs["Value"], intensityMixNode.inputs["Fac"])
-			nodeTree.links.new(colorMixnode.outputs["Color"], intensityMixNode.inputs["Color2"])
-			furColorSocket = intensityMixNode.outputs["Color"]
-		else:
-			furColorSocket = colorMixnode.outputs["Color"]
-		
-		matInfo["albedoNodeLayerGroup"].addMixLayer(
-			furColorSocket,
-			mixType="MULTIPLY",
-			mixFactor=1.0
-		)
+	# Fur_ColorDeep and Fur_ColorFront describe virtual parallax layers and must not be projected directly onto flat albedo
 	
 	roughnessProp = matInfo["mPropDict"].get("Fur_Roughness_BlendRate")
 	if roughnessProp is not None:
