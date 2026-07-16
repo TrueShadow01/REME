@@ -666,7 +666,7 @@ def sf6RGBToLinear(value):
 		return value / 12.92
 	return ((value + 0.055) / 1.055) ** 2.4
 
-def applySF6CMDMaterial(materialName, materialMap, propDict):
+def applySF6CMDMaterial(materialName, materialMap, propDict, meshPath=None):
 	colorIndexMap = (0, 1, 2, 3, 4, 5, 6, 7)
 
 	cmdMaterialName = materialName
@@ -687,6 +687,23 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 			matchType = "case-insensitive"
 	
 	records = materialMap.get(cmdMaterialName, [])
+
+	# C. Viper's scalp is Head00 slot 4, but its intended tint comes from hair slot 0.
+	meshPathParts = {
+		part.casefold()
+		for part in os.path.normpath(meshPath).split(os.sep)
+	} if meshPath else set()
+	if (
+		"esf030" in meshPathParts
+		and materialName.casefold() == "esf_head00"
+		and len(records) > 4
+	):
+		hairRecords = materialMap.get("esf_hair", [])
+		if hairRecords:
+			records = [record.copy() for record in records]
+			records[4] = records[4].copy()
+			records[4]["color"] = hairRecords[0]["color"]
+			print("[SF6 CMD] scalp: esf_Head00 slot 4 <- esf_hair slot 0")
 
 	if records:
 		print(f"[SF6 CMD] {matchType}: {materialName} -> {cmdMaterialName}")
@@ -996,7 +1013,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 
 			if gameName == "SF6":
 				for sf6CMDMaterialMap in sf6CMDMaterialMapList:
-					applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"])
+					applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"], meshPath)
 
 			nodes = blenderMaterial.node_tree.nodes
 			links = blenderMaterial.node_tree.links
