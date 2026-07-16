@@ -711,7 +711,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 			if enabled and propName in propDict:
 				propDict[propName].propValue = [value]
 
-def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=1,sf6CostumeIndex=1):
+def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=0,sf6CostumeIndex=1):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
 	USE_DDS = bpy.context.preferences.addons[ADDON_NAME].preferences.useDDS == True and bpy.app.version >= (4,2,0)
 	
@@ -728,16 +728,25 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		#raiseWarning("Natives path not found, can't import textures")
 		#raise Exception
 
-	sf6CMDUserPath = None
-	sf6CMDMaterialMap = {}
+	sf6CMDMaterialMapList = []
 
 	if gameName == "SF6":
-		sf6CMDUserPath = findSF6CMDUserPath(meshPath, sf6CmdIndex, sf6CostumeIndex)
-		if sf6CMDUserPath != None:
-			print(f"[SF6 CMD] Using {sf6CMDUserPath}")
-			sf6CMDMaterialMap = getSF6CMDMaterialMap(sf6CMDUserPath)
+		sf6CMDBasePath = findSF6CMDUserPath(meshPath, 0, sf6CostumeIndex)
+
+		if sf6CMDBasePath is not None:
+			print(f"[SF6 CMD] Using base {sf6CMDBasePath}")
+			sf6CMDMaterialMapList.append(getSF6CMDMaterialMap(sf6CMDBasePath))
 		else:
-			print(f"[SF6 CMD] No cmd user file found.")
+			print("[SF6 CMD] No base cmd_000 user file found")
+		
+		if sf6CmdIndex != 0:
+			sf6CMDSelectedPath = findSF6CMDUserPath(meshPath, sf6CmdIndex, sf6CostumeIndex)
+
+			if sf6CMDSelectedPath is not None:
+				print(f"[SF6 CMD] Using selected {sf6CMDSelectedPath}")
+				sf6CMDMaterialMapList.append(getSF6CMDMaterialMap(sf6CMDSelectedPath))
+			else:
+				print(f"[SF6 CMD] No selected cmd_{sf6CmdIndex:03d} user file found")
 	
 	chunkPathList = [chunkPath]
 	chunkPathList.extend(getChunkPathList(gameName))
@@ -976,7 +985,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			#print(gameName)
 
 			if gameName == "SF6":
-				applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"])
+				for sf6CMDMaterialMap in sf6CMDMaterialMapList:
+					applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"])
 
 			nodes = blenderMaterial.node_tree.nodes
 			links = blenderMaterial.node_tree.links

@@ -884,7 +884,7 @@ class ImportREMesh(Operator, ImportHelper):
     sf6CmdIndex: IntProperty(
         name="SF6 Color Index",
         description="CMD color file index. For example, 0 loads cmd_000 and 2 loads cmd_002. Leave to 1 to import SF6 Base Color outfit.",
-        default=1,
+        default=0,
         min=0,
         max=999,
     )

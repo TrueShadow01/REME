@@ -1474,6 +1474,61 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 
 		matInfo["roughnessNodeLayerGroup"].addMixLayer(decodeNode.outputs["Roughness"], factorSocket, mixType="MIX")
 	
+	wrinkleNode = matInfo["textureNodeDict"].get("WrinkledMap")
+	wrinkleRateProp = (matInfo["mPropDict"].get("Wrinkled_NormalBlendlRate") or matInfo["mPropDict"].get("Wrinkled_NormalBlendRate"))
+
+	if wrinkleNode is not None and wrinkleRateProp is not None:
+		try:
+			wrinkleNode.image.colorspace_settings.name = "Non-Color"
+		except Exception:
+			pass
+			
+		wrinkleDecodeNode = getBentNormalNodeGroup(nodeTree)
+		wrinkleDecodeNode.name = "SF6 Cloth Wrinkle Decode"
+
+		nodeTree.links.new(wrinkleNode.outputs["Color"], wrinkleDecodeNode.inputs["Color"])
+		nodeTree.links.new(wrinkleNode.outputs["Alpha"], wrinkleDecodeNode.inputs["Alpha"])
+
+		wrinkleNormalNode = nodeTree.nodes.new("ShaderNodeNormalMap")
+		wrinkleNormalNode.name = "SF6 Cloth Wrinkle Normal"
+
+		nodeTree.links.new(wrinkleDecodeNode.outputs["Color"], wrinkleNormalNode.inputs["Color"])
+
+		wrinkleRateNode = addPropertyNode(wrinkleRateProp, matInfo["currentPropPos"], nodeTree)
+		wrinkleRateNode.name = "SF6 Cloth Wrinkle Strength"
+
+		nodeTree.links.new(wrinkleRateNode.outputs["Value"], wrinkleNormalNode.inputs["Strength"])
+
+		geometryNode = nodeTree.nodes.get("geometryNode")
+		if geometryNode is None:
+			geometryNode = nodeTree.nodes.new("ShaderNodeNewGeometry")
+			geometryNode.name = "geometryNode"
+
+		if detailNormalSocket is None:
+			detailNormalSocket = geometryNode.outputs["Normal"]
+		
+		addNormalNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		addNormalNode.name = "SF6 Add Cloth Wrinkle"
+		addNormalNode.operation = "ADD"
+
+		nodeTree.links.new(detailNormalSocket, addNormalNode.inputs[0])
+		nodeTree.links.new(wrinkleNormalNode.outputs["Normal"], addNormalNode.inputs[1])
+
+		removeGeometryNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		removeGeometryNode.name = "SF6 Remove Base Normal"
+		removeGeometryNode.operation = "SUBTRACT"
+
+		nodeTree.links.new(addNormalNode.outputs["Vector"], removeGeometryNode.inputs[0])
+		nodeTree.links.new(geometryNode.outputs["Normal"], removeGeometryNode.inputs[1])
+
+		normalizeWrinkleNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		normalizeWrinkleNode.name = "SF6 Normalize Cloth Wrinkle"
+		normalizeWrinkleNode.operation = "NORMALIZE"
+
+		nodeTree.links.new(removeGeometryNode.outputs["Vector"], normalizeWrinkleNode.inputs[0])
+
+		detailNormalSocket = normalizeWrinkleNode.outputs["Vector"]
+
 	if detailNormalSocket is not None:
 		matInfo["detailNormalSocket"] = detailNormalSocket
 
