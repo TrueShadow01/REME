@@ -1475,7 +1475,10 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 		matInfo["roughnessNodeLayerGroup"].addMixLayer(decodeNode.outputs["Roughness"], factorSocket, mixType="MIX")
 	
 	wrinkleNode = matInfo["textureNodeDict"].get("WrinkledMap")
-	wrinkleRateProp = (matInfo["mPropDict"].get("Wrinkled_NormalBlendlRate") or matInfo["mPropDict"].get("Wrinkled_NormalBlendRate"))
+	wrinkleRateProp = (
+		matInfo["mPropDict"].get("Wrinkled_NormaBlendlRate") 
+		or matInfo["mPropDict"].get("Wrinkled_NormalBlendRate")
+		)
 
 	if wrinkleNode is not None and wrinkleRateProp is not None:
 		try:
@@ -1533,6 +1536,101 @@ def newSF6ClothDetailNode(nodeTree, textureType, matInfo):
 		matInfo["detailNormalSocket"] = detailNormalSocket
 
 	matInfo["_sf6ClothDetailBuilt"] = True
+	return imageNode
+
+def newSF6FurNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if matInfo.get("_sf6FurBuilt", False):
+		return imageNode
+	
+	furMapNode = matInfo["textureNodeDict"].get("Fur_Map")
+	if furMapNode is None:
+		return imageNode
+	
+	matInfo["_sf6FurBuilt"] = True
+
+	furDepthProp = matInfo["mPropDict"].get("Fur_LayerDepth")
+	furEnabledProp = matInfo["mPropDict"].get("Enable_ParallaxFur")
+
+	furIsDisabled = (furEnabledProp is not None and float(furEnabledProp.propValue[0]) <= 0.0)
+	furHasNoDepth = (furDepthProp is not None and float(furDepthProp.propValue[0]) <= 0.000001)
+
+	if furIsDisabled or furHasNoDepth:
+		return imageNode
+
+	try:
+		furMapNode.image.colorspace_settings.name = "Non-Color"
+	except Exception:
+		pass
+
+	# Apply Fur_Tiling value to primary UV Map
+	uvNode = nodeTree.nodes.get("UVMap1Node")
+	tilingProp = matInfo["mPropDict"].get("Fur_Tiling")
+
+	if uvNode is not None and tilingProp is not None:
+		tilingNode = addPropertyNode(tilingProp, matInfo["currentPropPos"], nodeTree)
+
+		scaleNode = nodeTree.nodes.new("ShaderNodeCombineXYZ")
+		scaleNode.name = "SF6 Fur UV Scale"
+		scaleNode.inputs["Z"].default_value = 1.0
+
+		mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+		mappingNode.name = "SF6 Fur Mapping"
+
+		nodeTree.links.new(tilingNode.outputs["Value"], scaleNode.inputs["X"])
+		nodeTree.links.new(tilingNode.outputs["Value"], scaleNode.inputs["Y"])
+		nodeTree.links.new(uvNode.outputs["UV"], mappingNode.inputs["Vector"])
+		nodeTree.links.new(scaleNode.outputs["Vector"], mappingNode.inputs["Scale"])
+		nodeTree.links.new(mappingNode.outputs["Vector"], furMapNode.inputs["Vector"])
+	
+	furMaskNode = nodeTree.nodes.new("ShaderNodeRGBToBW")
+	furMaskNode.name = "SF6 Fur Mask"
+	nodeTree.links.new(furMapNode.outputs["Color"], furMaskNode.inputs["Color"])
+
+	deepProp = matInfo["mPropDict"].get("Fur_ColorDeep")
+	frontProp = matInfo["mPropDict"].get("Fur_ColorFront")
+
+	if deepProp is not None and frontProp is not None:
+		deepNode = addPropertyNode(deepProp, matInfo["currentPropPos"], nodeTree)
+		frontNode = addPropertyNode(frontProp, matInfo["currentPropPos"], nodeTree)
+
+		colorMixnode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		colorMixnode.name = "SF6 Fur Depth Color"
+		nodeTree.links.new(furMaskNode.outputs[0], colorMixnode.inputs["Fac"])
+		nodeTree.links.new(deepNode.outputs["Color"], colorMixnode.inputs["Color1"])
+		nodeTree.links.new(frontNode.outputs["Color"], colorMixnode.inputs["Color2"])
+
+		intensityProp = matInfo["mPropDict"].get("Fur_ColorIntensity")
+		if intensityProp is not None:
+			intensityNode = addPropertyNode(intensityProp, matInfo["currentPropPos"], nodeTree)
+
+			intensityMixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+			intensityMixNode.name = "SF6 Fur Color Intensity"
+			intensityMixNode.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
+
+			nodeTree.links.new(intensityNode.outputs["Value"], intensityMixNode.inputs["Fac"])
+			nodeTree.links.new(colorMixnode.outputs["Color"], intensityMixNode.inputs["Color2"])
+			furColorSocket = intensityMixNode.outputs["Color"]
+		else:
+			furColorSocket = colorMixnode.outputs["Color"]
+		
+		matInfo["albedoNodeLayerGroup"].addMixLayer(
+			furColorSocket,
+			mixType="MULTIPLY",
+			mixFactor=1.0
+		)
+	
+	roughnessProp = matInfo["mPropDict"].get("Fur_Roughness_BlendRate")
+	if roughnessProp is not None:
+		roughnessNode = addPropertyNode(roughnessProp, matInfo["currentPropPos"], nodeTree)
+
+		matInfo["roughnessNodeLayerGroup"].addMixLayer(
+			furMaskNode.outputs[0],
+			roughnessNode.outputs["Value"],
+			mixType="MIX"
+		)
+	
 	return imageNode
 
 def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
@@ -2197,6 +2295,7 @@ nodeDict = {
 	"NRM":newNRMNode,
 	#"UNKN":newUNKNNode,
 	"SF6DETAIL":newSF6ClothDetailNode,
+	"SF6FUR": newSF6FurNode,
 	"SF6BODYDETAIL": newSF6BodyDetailNode,
 	"SF6FACEDETAIL": newSF6FaceDetailNode,
 	"SF6WRINKLE": newSF6FacialWrinkleNode,

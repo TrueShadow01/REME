@@ -261,6 +261,11 @@ sf6DetailNormalTypeSet = set([
 	"WrinkledMap",
 ])
 
+sf6FurTypeSet = set([
+	"Fur_Map",
+	"Fur_FlowMap",
+])
+
 sf6FacialWrinkleTypeSet =  {
 	"FacialWrinkleMap",
 }
@@ -280,6 +285,7 @@ usedTextureSet.update(NAMTypes)
 usedTextureSet.update(MiscMapTypes)
 usedTextureSet.update(sf6DetailMaskTypeSet)
 usedTextureSet.update(sf6DetailNormalTypeSet)
+usedTextureSet.update(sf6FurTypeSet)
 
 #print(sorted(list(usedTextureSet)))
 baseUVTilingList = set([#Node types that use UV_Tiling property
@@ -911,6 +917,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							nodeType = "UNKN"
 						
 						textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
+
+					elif gameName == "SF6" and textureType in sf6FurTypeSet:
+						textureNodeInfoList.append(("SF6FUR", textureType, imageList, outputPath))
+
 					elif autoDetectedAlbedo:
 						textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
 					
@@ -2039,8 +2049,60 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if matInfo["gameName"] == "SF6":
 						isTransparent = any (x in mmtr for x in [
 							"glass",
-							"eye"
+							"eye",
+							"seethrough",
+							"see_through",
 						])
+
+						if isTransparent and "SeeThrough_EdgeAlpha" in matInfo["mPropDict"]:
+							edgeAlphaNode = addPropertyNode(
+								matInfo["mPropDict"]["SeeThrough_EdgeAlpha"],
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+
+							layerWeightNode = nodes.new("ShaderNodeLayerWeight")
+							layerWeightNode.name = "SF6 See Through Facing"
+
+							invertFacingNode = nodes.new("ShaderNodeMath")
+							invertFacingNode.name = "SF6 See Through Edge"
+							invertFacingNode.operation = "SUBTRACT"
+							invertFacingNode.inputs[0].default_value = 1.0
+							links.new(layerWeightNode.outputs["Facing"], invertFacingNode.inputs[1])
+
+							edgePowerNode = nodes.new("ShaderNodeMath")
+							edgePowerNode.name = "SF6 See Through Edge Power"
+							edgePowerNode.operation = "POWER"
+							links.new(invertFacingNode.outputs["Value"], edgePowerNode.inputs[0])
+
+							if "SeeThrough_EdgePow" in matInfo["mPropDict"]:
+								edgePowNode = addPropertyNode(
+									matInfo["mPropDict"]["SeeThrough_EdgePow"],
+									matInfo["currentPropPos"],
+									nodeTree
+								)
+								links.new(edgePowNode.outputs["Value"], edgePowerNode.inputs[1])
+							
+							edgeMixNode = nodes.new("ShaderNodeMixRGB")
+							edgeMixNode.name = "SF6 See Through Opacity"
+							edgeMixNode.inputs["Color2"].default_value = (1.0, 1.0, 1.0, 1.0)
+							links.new(edgePowerNode.outputs["Value"], edgeMixNode.inputs["Fac"])
+							
+							invertEdgeAlphaNode = nodes.new("ShaderNodeMath")
+							invertEdgeAlphaNode.name = "SF6 See Through Base Opacity"
+							invertEdgeAlphaNode.operation = "SUBTRACT"
+							invertEdgeAlphaNode.inputs[0].default_value = 1.0
+							links.new(edgeAlphaNode.outputs["Value"], invertEdgeAlphaNode.inputs[1])
+
+							links.new(invertEdgeAlphaNode.outputs["Value"], edgeMixNode.inputs[1])
+
+							finalAlphaNode = nodes.new("ShaderNodeMath")
+							finalAlphaNode.name = "SF6 See Through Final Alpha"
+							finalAlphaNode.operation = "MULTIPLY"
+							links.new(matInfo["alphaSocket"], finalAlphaNode.inputs[0])
+							links.new(edgeMixNode.outputs["Color"], finalAlphaNode.inputs[1])
+
+							matInfo["alphaSocket"] = finalAlphaNode.outputs["Value"]
 
 						isCutout = any(x in mmtr for x in [
 							"lash",
@@ -2197,8 +2259,28 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				
 				currentPos = [nodeBSDF.location[0]+300,nodeBSDF.location[1]]
 				
-				#Only enabled for hair and MHR wing materials atm since it doesn't look right on much else
-				if IMPORT_TRANSLUCENT and matInfo["translucentSocket"] != None and ("Translucency" in matInfo["mPropDict"] or "Translucency_Param" in matInfo["mPropDict"]) and ("wing" in matInfo["mmtrName"] or "hair" in matInfo["mmtrName"]) and matInfo["gameName"] != "DMC5":
+				isSF6SeeThrough = (
+					matInfo["gameName"] == "SF6"
+					and any(name in matInfo["mmtrName"] for name in (
+						"seethrough",
+						"see_through"
+					))
+				)
+
+				if (
+					(IMPORT_TRANSLUCENT or isSF6SeeThrough)
+					and matInfo["translucentSocket"] is not None
+					and (
+						"Translucency" in matInfo["mPropDict"]
+						or "Translucency_Param" in matInfo["mPropDict"]
+					)
+					and (
+						"wing" in matInfo["mmtrName"]
+						or "hair" in matInfo["mmtrName"]
+						or isSF6SeeThrough
+					)
+					and matInfo["gameName"] != "DMC5"
+				):
 					
 					gammaNode = nodes.new("ShaderNodeGamma")#Needs a gamma change for the mixed shader nodes to look right
 					gammaNode.location = currentPos
