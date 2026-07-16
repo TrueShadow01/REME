@@ -614,7 +614,7 @@ def getSF6CMDMaterialMap(cmdPath):
 
 		colorRecords[colorRef] = {
 			"offset": offset,
-			"colorEnabled": flags[3],
+			"colorOption": flags[3],
 			"color": tuple(data[offset + 40:offset + 44]),
 			"blendRate": (flags[0], f32(offset + 4)),
 			"roughness": (flags[1], f32(offset + 12)),
@@ -697,7 +697,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict):
 		colorIndex = colorIndexMap[recordIndex]
 		colorProp = f"CustomizeColor_{colorIndex}"
 
-		if record["colorEnabled"] and colorProp in propDict:
+		if colorProp in propDict:
 			r, g, b, a = record["color"]
 			propDict[colorProp].propValue = [
 				sf6RGBToLinear(r),
