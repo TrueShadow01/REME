@@ -444,7 +444,7 @@ def findMDFPathFromMeshPath(meshPath,gameName = None):
 				if gameName == "MHWILDS":
 					
 					if not os.path.isfile(mdfPath) and fileName.startswith("ch"):
-						dirSplit = rootPath.split("Character",1)
+						dirSplit = re.split(r"character", rootPath, maxsplit=1, flags=re.IGNORECASE)
 						
 						if fileName.count("_") == 2 and len(dirSplit) == 2:#Some models use materials from other gender
 							isMale = "_000_" in fileName
