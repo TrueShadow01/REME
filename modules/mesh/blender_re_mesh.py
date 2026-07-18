@@ -719,7 +719,7 @@ def importMesh(
                 # print(vertexIndex)
                 # print(boneIndexList)
                 for weightIndex, boneIndex in enumerate(boneIndexList):
-                    if vertexGroupWeightList[vertexIndex][weightIndex] > 0:
+                    if vertexGroupWeightListSecondary[vertexIndex][weightIndex] > 0:
                         boneName = "SHAPEKEY_" + boneNameList[boneIndex]
                         if len(boneName) > 63:
                             boneName = f"#HASHED_{str(hashUTF8(boneName))}"
