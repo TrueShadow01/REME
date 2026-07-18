@@ -759,7 +759,7 @@ class REMeshMPLY:
         self.boneNameRemapList = []
 
     def read(
-        self, file, version, lodTarget=None, streamingBuffer=None
+        self, file, version, lodTarget=None, streamingBuffer=None, importBlendShapes=None
     ):  # LOD target is an int that determines what lod level to import, the rest get ignored
         self.streamingBuffer = streamingBuffer
         if streamingBuffer is not None:
