@@ -758,6 +758,10 @@ class REMeshMPLY:
         self.meshBufferHeader = None
         self.boneNameRemapList = []
 
+        # Compatibility with ParsedREMesh
+        self.blendShapeHeader = None
+        self.boneBoundingBoxHead = None
+
     def read(
         self, file, version, lodTarget=None, streamingBuffer=None, importBlendShapes=None
     ):  # LOD target is an int that determines what lod level to import, the rest get ignored
