@@ -884,6 +884,12 @@ def newNRMNode (nodeTree,textureType,matInfo):
 	return imageNode
 def newNAMNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
+
+	if textureType == "StitchMap" and matInfo["gameName"] == "SF6":
+		stitchOnProp = matInfo["mPropDict"].get("Stitch_On")
+		if stitchOnProp is not None and float(stitchOnProp.propValue[0]) <= 0.0:
+			return imageNode
+
 	currentPos = [imageNode.location[0]-300,imageNode.location[1]]
 	
 	separateRGBNode = nodeTree.nodes.new("ShaderNodeSeparateColor")
