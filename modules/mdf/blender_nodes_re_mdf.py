@@ -898,7 +898,7 @@ def newSF6StitchNode(nodeTree, imageNode, matInfo):
 	# alpha channel defines where the stitch pattern is present
 	stitchMaskSocket = imageNode.outputs["Alpha"]
 
-	tilingProp = props.get("Stitch_TilinOffcets")
+	tilingProp = props.get("Stitch_TilingOffcets")
 	if tilingProp is not None:
 		tilingNode = addPropertyNode(
 			tilingProp,
