@@ -748,7 +748,7 @@ class REMeshPreferences(AddonPreferences):
         box.operator("re_mesh_cm.open_texture_cache_folder")
         box.operator("re_mesh_cm.clear_texture_cache_folder")
 
-        op.url = "https://ko-fi.com/nsacloud"
+        op.url = "https://ko-fi.com/breadgamer123"
 
         # Import defaults
         row = layout.row()
