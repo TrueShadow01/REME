@@ -953,6 +953,33 @@ def newSF6StitchNode(nodeTree, imageNode, matInfo):
 		nodeTree.links.new(colorBNode.outputs["Color"], colorMixNode.inputs["Color2"])
 
 		matInfo["albedoNodeLayerGroup"].addMixLayer(colorMixNode.outputs["Color"], factorOutSocket=stitchMaskSocket, mixType="MULTIPLY", mixFactor=1.0)
+	
+	normalNode = nodeTree.nodes.new("ShaderNodeCombineColor")
+	normalNode.name = "SF6 Stitch Normal"
+	normalNode.inputs["Blue"].default_value = 1.0
+	nodeTree.links.new(separateNode.outputs["Red"], normalNode.inputs["Red"])
+	nodeTree.links.new(separateNode.outputs["Green"], normalNode.inputs["Green"])
+
+	normalFactorSocket = stitchMaskSocket
+	normalRateProp = props.get("Stitch_NormalRate")
+
+	if normalRateProp is not None:
+		normalRateNode = addPropertyNode(
+			normalRateProp,
+			matInfo["currentPropPos"],
+			nodeTree
+		)
+
+		normalFactorNode = nodeTree.nodes.new("ShaderNodeMath")
+		normalFactorNode.name = "SF6 Stitch Normal Strength"
+		normalFactorNode.operation = "MULTIPLY"
+		normalFactorNode.use_clamp = True
+		nodeTree.links.new(stitchMaskSocket, normalFactorNode.inputs[0])
+		nodeTree.links.new(normalRateNode.outputs["Value"], normalFactorNode.inputs[1])
+		normalFactorSocket = normalFactorNode.outputs["Value"]
+
+	matInfo["normalNodeLayerGroup"].addMixLayer(normalNode.outputs["Color"], factorOutSocket=normalFactorSocket)
+
 	return imageNode
 
 def newNAMNode (nodeTree,textureType,matInfo):
