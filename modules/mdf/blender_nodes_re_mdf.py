@@ -930,6 +930,37 @@ def newSF6StitchNode(nodeTree, imageNode, matInfo):
 		nodeTree.links.new(offsetNode.outputs["Vector"], mappingNode.inputs["Location"])
 		nodeTree.links.new(mappingNode.outputs["Vector"], imageNode.inputs["Vector"])
 
+	stitchAOSocket = separateNode.outputs["Blue"]
+	contrastProp = props.get("Stitch_AOColorContrast")
+
+	if contrastProp is not None:
+		contrastNode = addPropertyNode(
+			contrastProp,
+			matInfo["currentPropPos"],
+			nodeTree
+		)
+
+		centerNode = nodeTree.nodes.new("ShaderNodeMath")
+		centerNode.name = "SF6 Stitch AO Center"
+		centerNode.operation = "SUBTRACT"
+		centerNode.inputs[1].default_value = 0.5
+		nodeTree.links.new(stitchAOSocket, centerNode.inputs[0])
+
+		contrastMultiplyNode = nodeTree.nodes.new("ShaderNodeMath")
+		contrastMultiplyNode.name = "SF6 Stitch AO Contrast"
+		contrastMultiplyNode.operation = "MULTIPLY"
+		nodeTree.links.new(centerNode.outputs["Value"], contrastMultiplyNode.inputs[0])
+		nodeTree.links.new(contrastNode.outputs["Value"], contrastMultiplyNode.inputs[1])
+
+		uncenterNode = nodeTree.nodes.new("ShaderNodeMath")
+		uncenterNode.name = "SF6 Stitch AO Result"
+		uncenterNode.operation = "ADD"
+		uncenterNode.inputs[1].default_value = 0.5
+		uncenterNode.use_clamp = True
+		nodeTree.links.new(contrastMultiplyNode.outputs["Value"], uncenterNode.inputs[0])
+
+		stitchAOSocket = uncenterNode.outputs["Value"]
+
 	colorAProp = props.get("Stitch_A_AOColor")
 	colorBProp = props.get("Stitch_B_AOColor")
 
@@ -948,7 +979,7 @@ def newSF6StitchNode(nodeTree, imageNode, matInfo):
 
 		colorMixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
 		colorMixNode.name = "SF6 Stitch AO Color"
-		nodeTree.links.new(separateNode.outputs["Blue"], colorMixNode.inputs["Fac"])
+		nodeTree.links.new(stitchAOSocket, colorMixNode.inputs["Fac"])
 		nodeTree.links.new(colorANode.outputs["Color"], colorMixNode.inputs["Color1"])
 		nodeTree.links.new(colorBNode.outputs["Color"], colorMixNode.inputs["Color2"])
 
