@@ -1,36 +1,80 @@
-# RE Mesh Editor Community Fork
+# REME - RE Mesh Editor Community Edition
 
-A Blender addon for importing/exporting RE Engine mesh, material, texture-adjacent data, maintained as a community fork of NSACloud's original plugin.
+An actively maintained Blender addon for importing and exporting RE Engine meshes, materials, textures and related data.
+
+REME continues NSACloud's original RE Mesh Editor with compatibility fixes, newer-format support and expanded Street Fighter 6 material reconstruction.
+
+[![Latest Release](https://img.shields.io/github/v/release/TrueShadow01/REME)](https://github.com/TrueShadow01/REME/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/TrueShadow01/REME/total)](https://github.com/TrueShadow01/REME/releases)
+[![License](https://img.shields.io/github/license/TrueShadow01/REME)](LICENSE)
 
 ## Status
-- Actively maintained
-- Blender 4.3.2+ supported
-- Blender 5.1 not supported currently
-- Some newer-game support is experimental
-- Monster Hunter Wilds mesh import is experimental
-- Blend-shape import is supported for some legacy and newer formats but needs broader testing
 
-# Requirements
+- Actively maintained
+- Supports Blender 4.3.2 through 4.5, Blender 5.0 is not tested yet
+- Blender 5.1 is not currently supported
+- Newer-game formats and some blend-shape paths remain experimental
+
+## Requirements
 - Blender 4.3.2 or higher
 
 ## Installation
-1. Download the latest addon version zip file from Releases
-2. In Blender, go to Edit > Preferences > Add-ons
-3. Install from zip
-4. Enable RE Mesh Editor (Community Maintained)
+
+1. Download the addon RAR from the [latest release](https://github.com/TrueShadow01/REME/releases/latest)
+2. Do not extract the archive
+3. In Blender, open **Edit → Preferences → Add-ons**
+4. Disable the original RE Mesh Editor Addon if it is installed
+5. Click the menu in the upper-right corner and choose **Install from Disk**
+6. Select the `REME.rar` file
+7. Enable **RE Mesh Editor (Community Maintained)**
+
+## Visual Comparison
+
+REME improves alpha transparency, hair materials, face details and texture handling for Street Fighter 6 and newer RE Engine Games.
+
+### Street Fighter 6 - Cammy Outfit 3
+
+<table>
+    <tr>
+        <th>Original Addon</th>
+        <th>REME Addon</th>
+    </tr>
+    <tr>
+        <td>
+            <img src="docs/images/Before.png" width="450">
+            <p><sub>Missing materials and incorrect transparency</sub></p>
+        </td>
+        <td>
+            <img src="docs/images/After.png" width="400">
+            <p><sub>Reconstructed materials and corrected transparency</sub></p>
+        </td>
+    </tr>
+</table>
 
 ## Features
-- Import/export RE Engine `.mesh` files for supported titles
+
+### General
+
+- Import and export supported RE Engine `.mesh` files
 - Import materials and texture bindings
-- Import blend shapes as Blender shape keys for supported mesh formats
-- Experimental Monster Hunter Wilds mesh import support and Legacy (pre SF6)
-- Experimental Street Fighter 6 material reconstruction
-- SF6 CMD costume-color parsing, including fixed and variable-length color clusters
-- SF6 CMASK/CMASK2 colors, cloth shading, body details, hair tinting and shared-head material support
-- SF6 StitchMap reconstruction with material-controlled tiling, color variation, AO contrast, normal strength and roughness
+- Import supported blend shapes as Blender shape keys
 - Batch export tools
 - Presets for multiple RE Engine games
-- Texture/material helper tools
+- Texture and material helper tools
+
+### Street Fighter 6
+
+- Experimental material reconstruction
+- CMD costume-color parsing
+- CMASK and CMASK2 color support
+- Cloth shading and body-detail reconstruction
+- Hair tinting and shared-head material support
+- StitchMap reconstruction with configurable tiling, AO, normals, roughness, and color variation
+
+### Experimental Newer-Format Support
+
+- Monster Hunter Wilds mesh import
+- Preliminary mappings for newer RE Engine titles
 
 ## Game And Format Support
 
@@ -114,7 +158,7 @@ SF6 Color Index: 1
 
 **Contributing**: If you're interested in tackling any of these areas, feel free to open an issue or PR.
 
-# Credits
+## Credits
 - [Ando](https://github.com/Andoryuuta) - Solving the compression format for MH Wilds textures.
 - [AsteriskAmpersand](https://github.com/AsteriskAmpersand) - Mesh format research and tex conversion code
 - [AlphaZomega](https://github.com/alphazolam/) - RE Mesh 010 Template and Noesis plugin
