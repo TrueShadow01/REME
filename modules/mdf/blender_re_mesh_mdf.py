@@ -608,17 +608,17 @@ def getSF6CMDMaterialMap(cmdPath):
 		if tuple(instanceTypes[ref] for ref in refs) != SF6_CMD_TYPES:
 			continue
 
-		flags = (u32(offset), u32(offset + 8), u32(offset + 16), u32(offset + 36))
-		if not all(flag in (0, 1) for flag in flags):
+		enableFlags = (u32(offset), u32(offset + 8), u32(offset + 16), u32(offset + 36))
+		if not all(flag in (0, 1) for flag in enableFlags):
 			continue
 
 		colorRecords[colorRef] = {
 			"offset": offset,
-			"colorOption": flags[3],
+			"colorEnabled": enableFlags[3],
 			"color": tuple(data[offset + 40:offset + 44]),
-			"blendRate": (flags[0], f32(offset + 4)),
-			"roughness": (flags[1], f32(offset + 12)),
-			"metalness": (flags[2], f32(offset + 20)),
+			"blendRate": (enableFlags[0], f32(offset + 4)),
+			"roughness": (enableFlags[1], f32(offset + 12)),
+			"metalness": (enableFlags[2], f32(offset + 20)),
 		}
 
 	for lengthOffset in range(dataOffset, len(data) - 12, 4):
