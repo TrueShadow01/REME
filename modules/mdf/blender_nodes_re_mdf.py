@@ -980,6 +980,17 @@ def newSF6StitchNode(nodeTree, imageNode, matInfo):
 
 	matInfo["normalNodeLayerGroup"].addMixLayer(normalNode.outputs["Color"], factorOutSocket=normalFactorSocket)
 
+	roughnessProp = props.get("Stitch_Roughness")
+
+	if roughnessProp is not None:
+		roughnessNode = addPropertyNode(
+			roughnessProp,
+			matInfo["currentPropPos"],
+			nodeTree
+		)
+
+		matInfo["roughnessNodeLayerGroup"].addMixLayer(roughnessNode.outputs["Value"], factorOutSocket=stitchMaskSocket)
+
 	return imageNode
 
 def newNAMNode (nodeTree,textureType,matInfo):
