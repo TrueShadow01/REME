@@ -27,9 +27,36 @@ A Blender addon for importing/exporting RE Engine mesh, material, texture-adjace
 - Experimental Street Fighter 6 material reconstruction
 - SF6 CMD costume-color parsing, including fixed and variable-length color clusters
 - SF6 CMASK/CMASK2 colors, cloth shading, body details, hair tinting and shared-head material support
+- SF6 StitchMap reconstruction with material-controlled tiling, color variation, AO contrast, normal strength and roughness
 - Batch export tools
 - Presets for multiple RE Engine games
 - Texture/material helper tools
+
+## Game And Format Support
+
+The following versions are explicitly recognized by the addon. Support can vary by asset type, shader and game update.
+
+| Game | Internal Name | MESH Version | MDF Version | TEX Version | Status |
+|---|---|---:|---:|---:|---|
+| Devil May Cry 5 | `DMC5` | `1808282334` | `10` | `11` | Supported |
+| Resident Evil 2 | `RE2` | `1808312334` | `10` | `10` | Supported |
+| Resident Evil 3 | `RE3` | `1902042334` | `13` | `190820018` | Supported |
+| Resident Evil Village / RE:Verse | `RE8` | `2101050001` / `2102020001` | `19` / `20` | `30` | Supported |
+| Resident Evil 2/3 Ray Tracing | `RE2RT` / `RE3RT` | `2109108288` | `21` | `34` | Supported |
+| Resident Evil 7 Ray Tracing | `RE7RT` | `220128762` | `21` | `35` | Supported |
+| Monster Hunter Rise / Sunbreak | `MHRSB` | `2109148288` | `23` | `28` | Supported |
+| Resident Evil 4 | `RE4` | `221108797` | `32` | `143221013` | Supported |
+| Street Fighter 6 | `SF6` | `230110883` | `31` | `241101895` | Experimental enhanced support |
+| Dragon's Dogma 2 | `DD2` | `231011879` / `240423143` | `40` | `760230703` | Supported |
+| Kunitsu-Gami | `KG` | `240306278` | `40` | `231106777` | Limited validation |
+| Dead Rising Deluxe Remaster | `DR` | `240424828` | `40` | `240606151` | Limited validation |
+| Onimusha 2 | `ONI2` | `240827123` | `46` | `240701001` | Limited validation |
+| Monster Hunter Wilds | `MHWILDS` | `241111606` | `45` | `241106027` | Experimental |
+| Monster Hunter Stories 3 | `MHS3` | `250604100` | `49` | `251111100` | Preliminary |
+| Pragmata | `PRAG` | Not enabled | `51` | `250813143` | Preliminary |
+| Resident Evil 9 / Requiem | `RE9` | `250925211` | `51` | `250813143` | Preliminary |
+
+“Supported” means the corresponding format versions have importer mappings. It does not guarantee perfect reconstruction of every material, effect, animation or blend shape.
 
 ## Street Fighter 6 Support
 
