@@ -882,13 +882,84 @@ def newNRMNode (nodeTree,textureType,matInfo):
 	
 	matInfo["normalNodeLayerGroup"].addMixLayer(imageNode.outputs["Color"])
 	return imageNode
+
+def newSF6StitchNode(nodeTree, imageNode, matInfo):
+	props = matInfo["mPropDict"]
+	stitchOnProp = props.get("Stitch_On")
+
+	if stitchOnProp is not None and float(stitchOnProp.propValue[0]) <= 0.0:
+		return imageNode
+	
+	separateNode = nodeTree.nodes.new("ShaderNodeSeparateColor")
+	separateNode.name = "SF6 Stitch Channels"
+	separateNode.location = addLoc(imageNode, (300, 0))
+	nodeTree.links.new(imageNode.outputs["Color"], separateNode.inputs["Color"])
+
+	# alpha channel defines where the stitch pattern is present
+	stitchMaskSocket = imageNode.outputs["Alpha"]
+
+	tilingProp = props.get("Stitch_TilinOffcets")
+	if tilingProp is not None:
+		tilingNode = addPropertyNode(
+			tilingProp,
+			matInfo["currentPropPos"],
+			nodeTree
+		)
+
+		uvNode = nodeTree.nodes.get("UVMap1Node")
+		if uvNode is None:
+			uvNode = nodeTree.nodes.new("ShaderNodeUVMap")
+			uvNode.name = "UVMap1Node"
+			uvNode.uv_map = "UVMap0"
+		
+		scaleNode = nodeTree.nodes.new("ShaderNodeCombineXYZ")
+		scaleNode.name = "SF6 Stitch Scale"
+		scaleNode.inputs["Z"].default_value = 1.0
+		nodeTree.links.new(tilingNode.outputs["X"], scaleNode.inputs["X"])
+		nodeTree.links.new(tilingNode.outputs["Y"], scaleNode.inputs["Y"])
+
+		offsetNode = nodeTree.nodes.new("ShaderNodeCombineXYZ")
+		offsetNode.name = "SF6 Stitch Offset"
+		nodeTree.links.new(tilingNode.outputs["Z"], offsetNode.inputs["X"])
+		nodeTree.links.new(tilingNode.outputs["W"], offsetNode.inputs["Y"])
+
+		mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+		mappingNode.name = "SF6 Stitch Mapping"
+		nodeTree.links.new(uvNode.outputs["UV"], mappingNode.inputs["Vector"])
+		nodeTree.links.new(scaleNode.outputs["Vector"], mappingNode.inputs["Scale"])
+		nodeTree.links.new(offsetNode.outputs["Vector"], mappingNode.inputs["Location"])
+		nodeTree.links.new(mappingNode.outputs["Vector"], imageNode.inputs["Vector"])
+
+	colorAProp = props.get("Stitch_A_AOColor")
+	colorBProp = props.get("Stitch_B_AOColor")
+
+	if colorAProp is not None or colorBProp is not None:
+		colorANode = addPropertyNode(
+			colorAProp or colorBProp,
+			matInfo["currentPropPos"],
+			nodeTree
+		)
+
+		colorBNode = addPropertyNode(
+			colorBProp or colorAProp,
+			matInfo["currentPropPos"],
+			nodeTree
+		)
+
+		colorMixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		colorMixNode.name = "SF6 Stitch AO Color"
+		nodeTree.links.new(separateNode.outputs["Blue"], colorMixNode.inputs["Fac"])
+		nodeTree.links.new(colorANode.outputs["Color"], colorMixNode.inputs["Color1"])
+		nodeTree.links.new(colorBNode.outputs["Color"], colorMixNode.inputs["Color2"])
+
+		matInfo["albedoNodeLayerGroup"].addMixLayer(colorMixNode.outputs["Color"], factorOutSocket=stitchMaskSocket, mixType="MULTIPLY", mixFactor=1.0)
+	return imageNode
+
 def newNAMNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
 
 	if textureType == "StitchMap" and matInfo["gameName"] == "SF6":
-		stitchOnProp = matInfo["mPropDict"].get("Stitch_On")
-		if stitchOnProp is not None and float(stitchOnProp.propValue[0]) <= 0.0:
-			return imageNode
+		return newSF6StitchNode(nodeTree, imageNode, matInfo)
 
 	currentPos = [imageNode.location[0]-300,imageNode.location[1]]
 	
