@@ -2,3 +2,10 @@
 # Spyder project settings
 .spyderproject
 .spyproject
+
+# RE Asset Browser runtime data
+__pycache__/
+REAssetLibrary/
+*.reassetlib
+PakCache_*.pakcache
+ExtractInfo_*.json
