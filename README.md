@@ -69,7 +69,7 @@ REME improves alpha transparency, hair materials, face details and texture handl
 - CMASK and CMASK2 color support
 - Cloth shading and body-detail reconstruction
 - Hair tinting and shared-head material support
-- StitchMap reconstruction with configurable tiling, AO, normals, roughness, and color variation
+- StitchMap reconstruction with configurable tiling, AO, normals, roughness and color variation
 
 ### Experimental Newer-Format Support
 
@@ -90,7 +90,7 @@ The following versions are explicitly recognized by the addon. Support can vary 
 | Resident Evil 7 Ray Tracing | `RE7RT` | `220128762` | `21` | `35` | Supported |
 | Monster Hunter Rise / Sunbreak | `MHRSB` | `2109148288` | `23` | `28` | Supported |
 | Resident Evil 4 | `RE4` | `221108797` | `32` | `143221013` | Supported |
-| Street Fighter 6 | `SF6` | `230110883` | `31` | `241101895` | Experimental enhanced support |
+| Street Fighter 6 | `SF6` | `230110883` | `31` | `241101895` | Supported |
 | Dragon's Dogma 2 | `DD2` | `231011879` / `240423143` | `40` | `760230703` | Supported |
 | Kunitsu-Gami | `KG` | `240306278` | `40` | `231106777` | Limited validation |
 | Dead Rising Deluxe Remaster | `DR` | `240424828` | `40` | `240606151` | Limited validation |
@@ -126,19 +126,17 @@ SF6 Color Index: 1
 - Blend-shape support varies by game and mesh format
 - SF6 blend shapes are kept at zero by default
 - Automatic SF6 JCNS pose-corrective drivers are disabled while their vertex mapping remains experimental
+- SF6 `FakeSqhereMap` eye reflections are not supported yet
 - Extreme FK poses may not match the game's deformation without pose-corrective shapes
 - The imported skeleton does not include custom IK or animator-facing controls
 - Blend-shape export is not guaranteed for every supported import path
 - Damage, sweat, animated muscle, cloth-wave and some auxiliary SF6 effects are not reconstructed
-- Blender materials cannot reproduce every RE Engine lighting and shader effect exactly
 
 ## Roadmap
 
 ### Near Term
 - Validate Street Fighter 6 materials across more fighters, costumes, color variants and shader types
-- Investigate SF6 blend-shape vertex mapping and safely restore JCNS pose-corrective drivers
 - Add automated regression tests for CMD parsing and material matching
-- Improve remaining SF6 effects such as damage, sweat, animated deformation and specialized transparency
 - Improve texture import reliability and support for newer compression formats
 - Validate compatibility with RE2, RE3, RE4R, RE7RT and newer RE Engine titles
 
