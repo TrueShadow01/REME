@@ -68,14 +68,12 @@ def _queue_placeholder_deletion(object_name):
 
 @persistent
 def asset_browser_import_post(import_context):
-    if len(import_context.import_items) != 1:
+    import_item = next((item for item in import_context.import_items if item.id is not None and item.id.get("~TYPE") == "RE_ASSET_LIBRARY_ASSET"), None)
+    if import_item is None:
         return
     
-    import_item = import_context.import_items[0]
     asset = import_item.id
-
-    if asset.get("~TYPE") != "RE_ASSET_LIBRARY_ASSET":
-        return
+    print(f"RE Asset Browser - Handling: {asset.name}")
     
     placeholder_name = asset.name
     game_name = asset.get("~GAME", "UNKNOWN")
