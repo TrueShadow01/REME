@@ -491,6 +491,32 @@ class REMeshPreferences(AddonPreferences):
         description="Show import options when dragging a mesh or mdf file into the 3D View.\nIf this is disabled, the default import options will be used.\nDrag and drop importing is only supported on Blender 4.1 or higher",
         default=False if bpy.app.version < (4, 1, 0) else True,
     )
+
+    assetLibraryPath: StringProperty(
+        name="Asset Library Path",
+        subtype="DIR_PATH",
+        description="Location where downloaded RE Asset Browser libraries are stored",
+        default=os.path.join(bpy.utils.user_resource("DATAFILES"), "REME", "AssetLibraries")
+    )
+
+    showMeshImportOptions: BoolProperty(
+        name="Show Asset Browser Import Options",
+        description="Show REME mesh import options when dragging a mesh from the Asset Browser",
+        default=True
+    )
+
+    placeAtCursor: BoolProperty(
+        name="Place Asset At Cursor",
+        description="Place imported Asset Browser meshes at the drop location instead of the world origin",
+        default=False
+    )
+
+    forceExtract: BoolProperty(
+        name="Force Extract Asset Files",
+        description="Extract files from the game archives even when matching extracted files already exist",
+        default=False
+    )
+
     showConsole: BoolProperty(
         name="Show Console During Import/Export",
         description="When importing or exporting a file, the console will be opened so that progress can be viewed.\nNote that if the console is already opened before import or export, it will be closed instead.\n This is a limitation of Blender, there's no way to get the active state of the console window.",
@@ -790,6 +816,13 @@ class REMeshPreferences(AddonPreferences):
             column2.prop(self, "default_useBlenderMaterialName")
             column2.prop(self, "default_preserveBoneMatrices")
             column2.prop(self, "default_exportBoundingBoxes")
+
+        asset_browser_box = layout.box()
+        asset_browser_box.label(text="RE Asset Browser", icon="ASSET_MANAGER")
+        asset_browser_box.prop(self, "assetLibraryPath")
+        asset_browser_box.prop(self, "showMeshImportOptions")
+        asset_browser_box.prop(self, "placeAtCursor")
+        asset_browser_box.prop(self, "forceExtract")
 
         layout.label(text="Chunk Path List")
         layout.prop(self, "saveChunkPaths")
