@@ -653,11 +653,13 @@ def getSF6CMDMaterialMap(cmdPath):
 		colorRefs = [u32(arrayOffset + 4 + index * 4) for index in range(colorCount)]
 		if all(ref in colorRecords for ref in colorRefs):
 			materialMap[materialName] = [colorRecords[ref] for ref in colorRefs]
-			
-	print(
-		f"[SF6 CMD] Parsed {len(materialMap)} material clusters, "
-		f"{len(colorRecords)} customize colors."
-	)
+
+	if DEBUG_MODE:	
+		print(
+			f"[SF6 CMD] Parsed {len(materialMap)} material clusters, "
+			f"{len(colorRecords)} customize colors."
+		)
+	
 	return materialMap
 
 def sf6RGBToLinear(value):
@@ -703,11 +705,12 @@ def applySF6CMDMaterial(materialName, materialMap, propDict, meshPath=None):
 			records = [record.copy() for record in records]
 			records[4] = records[4].copy()
 			records[4]["color"] = hairRecords[0]["color"]
-			print("[SF6 CMD] scalp: esf_Head00 slot 4 <- esf_hair slot 0")
+			if DEBUG_MODE:
+				print("[SF6 CMD] scalp: esf_Head00 slot 4 <- esf_hair slot 0")
 
-	if records:
+	if records and DEBUG_MODE:
 		print(f"[SF6 CMD] {matchType}: {materialName} -> {cmdMaterialName}")
-	elif any(name.startswith("CustomizeColor_") for name in propDict):
+	elif any(name.startswith("CustomizeColor_") for name in propDict) and DEBUG_MODE:
 		print(f"[SF6 CMD] no override, using MDF defaults: {materialName}")
 
 	for recordIndex, record in enumerate(records):
@@ -823,7 +826,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				isUsedTexture = textureType in usedTextureSet or (
 					gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet
 				)
-				if gameName == "SF6" and not isUsedTexture and not autoDetectedAlbedo:
+				if gameName == "SF6" and not isUsedTexture and not autoDetectedAlbedo and DEBUG_MODE:
 					print(f"[SF6 MDF] skipped texture binding: material={materialName}, type={textureType}, path={texture}")
 
 				if loadUnusedTextures or isUsedTexture or autoDetectedAlbedo:
