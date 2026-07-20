@@ -29,6 +29,7 @@ from bpy_extras.io_utils import ExportHelper, ImportHelper
 from rna_prop_ui import PropertyPanel
 
 from .modules.blender_utils import operator_exists
+from .modules import asset_browser
 
 # fbxskel
 from .modules.fbxskel.blender_re_fbxskel import exportFBXSkelFile, importFBXSkelFile
@@ -2303,9 +2304,10 @@ def register():
     from . import addon_updater_ops
 
     addon_updater_ops.register(bl_info)
-
+    asset_browser.register()
 
 def unregister():
+    asset_browser.unregister()
     del bpy.types.WindowManager.enableModFileTracking
     for classEntry in classes:
         bpy.utils.unregister_class(classEntry)
