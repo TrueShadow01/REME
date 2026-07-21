@@ -5,14 +5,17 @@ import subprocess
 from pathlib import Path, PurePosixPath
 import bpy
 from bpy.types import Operator
-from bpy.props import StringProperty
+from bpy.props import StringProperty, EnumProperty
 from bpy_extras.io_utils import ImportHelper
-from .gen_functions import openFolder
+from .gen_functions import openFolder, formatByteSize
 from .runtime import _get_reme_preferences
 from .asset.re_asset_operators import (
     WM_OT_FetchREAssetThumbnails,
     WM_OT_ImportREAssetLibraryFromCatalog,
-    WM_OT_InitializeREAssetLibrary
+    WM_OT_InitializeREAssetLibrary,
+    downloadREAssetLibDirectory,
+    download_file_from_google_drive,
+    getFileCRC
 )
 
 RE_ASSET_LIBRARY_PREFIX = "RE Assets - "
