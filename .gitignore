@@ -9,3 +9,6 @@ REAssetLibrary/
 *.reassetlib
 PakCache_*.pakcache
 ExtractInfo_*.json
+
+# Blender updater runtime state
+reme_updater/
