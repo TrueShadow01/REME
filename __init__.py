@@ -821,6 +821,11 @@ class REMeshPreferences(AddonPreferences):
         asset_browser_box = layout.box()
         asset_browser_box.label(text="RE Asset Browser", icon="ASSET_MANAGER")
         asset_browser_box.prop(self, "assetLibraryPath")
+
+        asset_library_row = asset_browser_box.row(align=True)
+        asset_library_row.operator("re_asset.detect_re_asset_library", icon="FILE_REFRESH")
+        asset_library_row.operator("re_asset.open_re_asset_library_folder", icon="FILE_FOLDER")
+        
         asset_browser_box.prop(self, "showMeshImportOptions")
         asset_browser_box.prop(self, "placeAtCursor")
         asset_browser_box.prop(self, "forceExtract")
