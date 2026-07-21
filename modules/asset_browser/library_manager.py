@@ -1,9 +1,12 @@
 import re
 import shutil
 import zipfile
+import subprocess
 from pathlib import Path, PurePosixPath
 import bpy
 from bpy.types import Operator
+from bpy.props import StringProperty
+from bpy_extras.io_utils import ImportHelper
 from .gen_functions import openFolder
 from .runtime import _get_reme_preferences
 from .asset.re_asset_operators import (
@@ -84,7 +87,7 @@ def _extract_library_package(package_path, library_root):
             if member.is_dir() or normalized_name.endswith("/"):
                 destination.mkdir(parents=True, exist_ok=True)
                 continue
-            
+
             destination.parent.mkdir(parents=True, exist_ok=True)
 
             with archive.open(member, "r") as source:
@@ -93,6 +96,81 @@ def _extract_library_package(package_path, library_root):
 
     library_directory = resolved_root / game_info_parent.parts[0]
     return game_name, library_directory
+
+class WM_OT_ImportREAssetLibrary(Operator, ImportHelper):
+    bl_idname = "re_asset.importlibrary"
+    bl_label = "Import RE Asset Library"
+    bl_description = "Install a RE Asset Library from a .reassetlib package"
+    bl_options = {"INTERNAL"}
+
+    filename_ext = ".reassetlib"
+
+    filter_glob: StringProperty(
+        default="*.reassetlib",
+        options={"HIDDEN"}
+    )
+
+    def execute(self, context):
+        package_path = Path(bpy.path.abspath(self.filepath))
+
+        if not package_path.is_file():
+            self.report({"ERROR"}, f"Package does not exist: {package_path}")
+            return {"CANCELLED"}
+
+        if package_path.suffix.casefold() != ".reassetlib":
+            self.report({"ERROR"}, "The selected file is not a .reassetlib package.")
+            return {"CANCELLED"}
+
+        try:
+            library_root = _get_library_root()
+            game_name, library_directory = (_extract_library_package(package_path, library_root))
+
+            resources_root = Path(__file__).resolve().parent / "Resources"
+            source_blend = (resources_root / "Blend" / "libraryBase.blend")
+            initialize_script = (resources_root / "Scripts" / "initializeLibrary.py")
+
+            game_info_path = (library_directory / f"GameInfo_{game_name}.json")
+            catalog_path = (library_directory / f"REAssetCatalog_{game_name}.tsv")
+            output_blend = (library_directory / f"REAssetLibrary_{game_name}.blend")
+
+            required_files = (source_blend, initialize_script, game_info_path, catalog_path)
+            missing_files = [path for path in required_files if not path.is_file()]
+
+            if missing_files:
+                missing_names = ",".join(path.name for path in missing_files)
+                raise ValueError(f"Required library files are missing: {missing_names}")
+
+            if not output_blend.exists():
+                shutil.copy2(source_blend, output_blend)
+
+            library_name = f"{RE_ASSET_LIBRARY_PREFIX}{game_name}"
+            library = _find_asset_library(library_name)
+            libraries = context.preferences.filepaths.asset_libraries
+
+            if library is None:
+                library = libraries.new(name=library_name, directory=str(library_directory))
+            else:
+                library.path = str(library_directory)
+
+            bpy.ops.wm.save_userpref()
+
+            command = [bpy.app.binary_path, "--background", str(output_blend), "--python", str(initialize_script)]
+            process_options = {}
+
+            if hasattr(subprocess, "CREATE_NO_WINDOW"):
+                process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            subprocess.Popen(command, **process_options)
+            self.report({"INFO"}, f"Started initializing the {game_name} Asset Library in background Blender.")
+            return {"FINISHED"}
+        except (
+            OSError,
+            ValueError,
+            zipfile.BadZipFile
+        ) as error:
+            print(f"RE Asset Browser package installation failed: {error}")
+            self.report({"ERROR"}, "Failed to install the RE Asset Library. See system console.")
+            return {"CANCELLED"}
 
 class WM_OT_DetectREAssetLibraries(Operator):
     bl_idname = "re_asset.detect_re_asset_library"
@@ -154,6 +232,7 @@ CLASSES = (
     WM_OT_FetchREAssetThumbnails,
     WM_OT_ImportREAssetLibraryFromCatalog,
     WM_OT_InitializeREAssetLibrary,
+    WM_OT_ImportREAssetLibrary,
     WM_OT_DetectREAssetLibraries,
     WM_OT_OpenREAssetLibraryFolder
 )
