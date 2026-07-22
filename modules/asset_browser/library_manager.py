@@ -20,6 +20,51 @@ from .asset.re_asset_operators import (
 
 RE_ASSET_LIBRARY_PREFIX = "RE Assets - "
 
+_download_library_entries = []
+_download_library_enum_items = []
+
+_REQUIRED_DOWNLOAD_FIELDS = frozenset({
+    "displayName",
+    "gameName",
+    "URL",
+    "CRC",
+    "compressedSize",
+    "uncompressedSize"
+})
+
+def _refresh_download_library_entries():
+    directory = downloadREAssetLibDirectory()
+    library_list = directory.get("libraryList") if isinstance(directory, dict) else None
+
+    _download_library_entries.clear()
+    _download_library_enum_items.clear()
+
+    if not isinstance(library_list, list):
+        return 0
+
+    for entry in library_list:
+        if not isinstance(entry, dict):
+            continue
+
+        if not _REQUIRED_DOWNLOAD_FIELDS.issubset(entry):
+            continue
+
+        entry_index = len(_download_library_entries)
+        description = str(entry.get("releaseDescription", ""))
+        description = description.replace("\r", " ").replace("\n", " ")
+
+        _download_library_entries.append(entry)
+        _download_library_enum_items.append((
+            str(entry_index),
+            str(entry["displayName"]),
+            description
+        ))
+
+    return len(_download_library_entries)
+
+def _get_download_library_items(self, context):
+    return _download_library_enum_items
+
 def _get_library_root():
     preferences = _get_reme_preferences()
     return Path(bpy.path.abspath(preferences.assetLibraryPath)).expanduser()
