@@ -145,6 +145,70 @@ def _extract_library_package(package_path, library_root):
     library_directory = resolved_root / game_info_parent.parts[0]
     return game_name, library_directory
 
+class WM_OT_DownloadREAssetLibrary(Operator):
+    bl_idname = "re_asset.downloadlibrary"
+    bl_label = "Download RE Asset Library"
+    bl_description = "Download and install a RE Asset Library"
+    bl_options = {"INTERNAL"}
+
+    selected_library: EnumProperty(
+        name="Asset Library",
+        description="Choose a RE Asset Library to download",
+        items=_get_download_library_items
+    )
+
+    def _get_selected_entry(self):
+        try:
+            entry_index = int(self.selected_library)
+        except (TypeError, ValueError):
+            return None
+
+        if entry_index < 0 or entry_index >= len(_download_library_entries):
+            return None
+
+        return _download_library_entries[entry_index]
+
+    def invoke(self, context, event):
+        try:
+            library_count = _refresh_download_library_entries()
+        except Exception as error:
+            print(f"Failed to retrieve the RE Asset Library directory: {error}")
+            self.report({"ERROR"}, "Could not retrieve the online Asset Library directory.")
+            return {"CANCELLED"}
+
+        if library_count == 0:
+            self.report({"ERROR"}, "No downloadable RE Asset Libraries were found.")
+            return {"CANCELLED"}
+
+        self.selected_library = "0"
+        return context.window_manager.invoke_props_dialog(self, width=520)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "selected_library")
+
+        entry = self._get_selected_entry()
+
+        if entry is None:
+            return
+
+        layout.separator()
+
+        information = layout.column(align=True)
+        information.label(text=f"Game: {entry['gameName']}")
+        information.label(text=f"Published: {entry.get('timestamp', 'Unknown')}")
+        information.label(text=f"Download size: {formatByteSize(int(entry['compressedSize']))}")
+        information.label(text=f"Installed size: {formatByteSize(int(entry['uncompressedSize']))}")
+
+        release_description = str(entry.get("releaseDescription", "")).strip()
+
+        if release_description:
+            release_box = layout.box()
+            release_box.label(text="Release notes:")
+
+            for line in release_description.splitlines():
+                release_box.label(text=line)
+
 class WM_OT_ImportREAssetLibrary(Operator, ImportHelper):
     bl_idname = "re_asset.importlibrary"
     bl_label = "Import RE Asset Library"
