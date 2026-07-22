@@ -414,6 +414,7 @@ CLASSES = (
     WM_OT_ImportREAssetLibraryFromCatalog,
     WM_OT_InitializeREAssetLibrary,
     WM_OT_ImportREAssetLibrary,
+    WM_OT_DownloadREAssetLibrary,
     WM_OT_DetectREAssetLibraries,
     WM_OT_OpenREAssetLibraryFolder
 )
