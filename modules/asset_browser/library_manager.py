@@ -2,6 +2,7 @@ import re
 import shutil
 import zipfile
 import subprocess
+import tempfile
 from pathlib import Path, PurePosixPath
 import bpy
 from bpy.types import Operator
@@ -208,6 +209,74 @@ class WM_OT_DownloadREAssetLibrary(Operator):
 
             for line in release_description.splitlines():
                 release_box.label(text=line)
+
+    def execute(self, context):
+        entry = self._get_selected_entry()
+
+        if entry is None:
+            self.report({"ERROR"}, "No valid Asset Library was selected.")
+            return {"CANCELLED"}
+
+        try:
+            expected_crc = int(entry["CRC"])
+            compressed_size = int(entry["compressedSize"])
+
+            if compressed_size <= 0:
+                raise ValueError("Invalid download size")
+        except (TypeError, ValueError) as error:
+            print(f"Invalid RE Asset Library directory entry: {error}")
+            self.report({"ERROR"}, "The selected library has invalid download information.")
+            return {"CANCELLED"}
+
+        game_name = str(entry["gameName"])
+        display_name = str(entry["displayName"])
+        file_id = str(entry["URL"])
+        safe_game_name = re.sub(r"[^A-Za-z0-9_.-]", "_", game_name) or "library"
+
+        package_path = None
+        window_manager = context.window_manager
+        window_manager.progress_begin(0, 100)
+
+        try:
+            with tempfile.NamedTemporaryFile(prefix=f"REME_{safe_game_name}_", suffix=".reassetlib", delete=False) as temporary_file:
+                package_path = Path(temporary_file.name)
+
+            print(f"Downloading {display_name} to {package_path}")
+
+            for chunk_index, chunk_size in download_file_from_google_drive(file_id=file_id, destination=str(package_path)):
+                download_size = (chunk_index + 1) * chunk_size
+                progress = min((download_size / compressed_size) * 100, 100)
+                window_manager.progress_update(progress)
+
+            if not package_path.is_file() or package_path.stat().st_size == 0:
+                raise OSError("The downloaded package is empty or missing")
+
+            actual_crc = getFileCRC(package_path)
+
+            if actual_crc != expected_crc:
+                raise ValueError(f"CRC check failed: expected {expected_crc}, got {actual_crc}")
+
+            print(f"CRC check passed for {display_name}")
+
+            result = bpy.ops.re_asset.importlibrary(filepath=str(package_path))
+
+            if "FINISHED" not in result:
+                raise RuntimeError("The downloaded package could not be installed")
+
+            self.report({"INFO"}, f"Downloaded {display_name}, Asset Library initialization started.")
+            return {"FINISHED"}
+        except Exception as error:
+            print(f"RE Asset Library download failed: {error}")
+            self.report({"ERROR"}, "Failed to download or install the Asset Library. See system console.")
+            return {"CANCELLED"}
+        finally:
+            window_manager.progress_end()
+
+            if package_path is not None:
+                try:
+                    package_path.unlink(missing_ok=True)
+                except OSError as error:
+                    print(f"Could not remove temporary package {package_path}: {error}")
 
 class WM_OT_ImportREAssetLibrary(Operator, ImportHelper):
     bl_idname = "re_asset.importlibrary"
