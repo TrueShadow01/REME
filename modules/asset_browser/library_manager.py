@@ -322,6 +322,147 @@ class WM_OT_CreateREAssetLibrary(Operator, ImportHelper):
             if (staging_directory is not None and staging_directory.is_dir()):
                 shutil.rmtree(staging_directory, ignore_errors=True)
 
+class WM_OT_PrepareREAssetLibraryUpdate(Operator, ImportHelper):
+    bl_idname = "re_asset.prepare_library_update"
+    bl_label = "Prepare RE Asset Library Update"
+    bl_description = "Generate an update candidate from a new RETool list without modifying the active library"
+    bl_options = {"INTERNAL"}
+
+    filename_ext = ".list"
+
+    filter_glob: StringProperty(
+        default="*.list",
+        options={"HIDDEN"}
+    )
+
+    game_name: StringProperty(
+        name="Game Name",
+        description="Existing library identifier, such as SF6, RE9 or MHWILDS",
+        default=""
+    )
+
+    file_types: StringProperty(
+        name="File Types",
+        description="Comma separated file types to include. Leave blank to retain library's current whitelist",
+        default=""
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "game_name")
+        layout.prop(self, "file_types")
+
+    def execute(self, context):
+        list_path = Path(bpy.path.abspath(self.filepath))
+        game_name = self.game_name.strip().upper()
+
+        if not re.fullmatch(r"[A-Z0-9_]+", game_name):
+            self.report({"ERROR"}, "Game Name may only contain letters, numbers and underscores.")
+            return {"CANCELLED"}
+
+        if not list_path.is_file():
+            self.report({"ERROR"}, f"RETool list file does not exist: {list_path}")
+            return {"CANCELLED"}
+
+        if list_path.suffix.casefold() != ".list":
+            self.report({"ERROR"}, "The selected file is not an RETool .list file.")
+            return {"CANCELLED"}
+
+        library_directory = _get_library_root() / game_name
+        catalog_name = f"REAssetCatalog_{game_name}.tsv"
+        game_info_name = f"GameInfo_{game_name}.json"
+
+        existing_catalog = library_directory / catalog_name
+        existing_game_info_path = library_directory / game_info_name
+        candidate_directory = library_directory / UPDATE_CANDIDATE_DIRECTORY
+
+        required_files = (
+            existing_catalog,
+            existing_game_info_path
+        )
+
+        missing_files = [path for path in required_files if not path.is_file()]
+
+        if missing_files:
+            missing_names = ", ".join(path.name for path in missing_files)
+            self.report({"ERROR"}, f"Existing library files are missing: {missing_names}")
+            return {"CANCELLED"}
+
+        if candidate_directory.exists():
+            self.report({"ERROR"}, "An update candidate already exists. Apply or discard it before preparing another.")
+            return {"CANCELLED"}
+
+        candidate_created = False
+        preparation_succeeded = False
+
+        try:
+            existing_game_info = _load_json_object(existing_game_info_path)
+            file_type_text = self.file_types.strip()
+
+            if file_type_text:
+                file_types = sorted({
+                    file_type.strip().lower()
+                    for file_type in file_type_text.split(",") if file_type.strip()
+                })
+            else:
+                existing_file_types = existing_game_info.get("fileTypeWhiteList")
+
+                if not isinstance(existing_file_types, list):
+                    raise ValueError("Existing GameInfo has an invalid fileTypeWhiteList")
+
+                file_types = sorted({
+                    str(file_type).strip().lower()
+                    for file_type in existing_file_types if str(file_type).strip()
+                })
+
+            if not file_types:
+                raise ValueError("At least one file type must be included.")
+
+            candidate_directory.mkdir()
+            candidate_created = True
+
+            generated_catalog = candidate_directory / f"Generated_{catalog_name}"
+            candidate_catalog = candidate_directory / catalog_name
+            candidate_game_info_path = candidate_directory / game_info_name
+            report_path = candidate_directory / "update_report.json"
+
+            REToolListFileToREAssetCatalogAndGameInfo(str(list_path), str(generated_catalog), str(candidate_game_info_path), file_types)
+
+            if not generated_catalog.is_file():
+                raise ValueError("Updated RETool list produced no catalog")
+
+            if not candidate_game_info_path.is_file():
+                raise ValueError("Updated RETool list produced no GameInfo")
+
+            generated_game_info = _load_json_object(candidate_game_info_path)
+            report = merge_catalog_files(existing_catalog, generated_catalog, candidate_catalog)
+
+            report["game_name"] = game_name
+            report["prepared_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+            report["source_list"] = str(list_path)
+            report["file_types"] = file_types
+            report["version_changes"] = compare_file_versions(existing_game_info, generated_game_info)
+            report["added_count"] = len(report["added_assets"])
+            report["removed_count"] = len(report["removed_assets"])
+
+            with report_path.open("w", encoding="utf-8") as stream:
+                json.dump(report, stream, indent=4, sort_keys=False)
+
+            preparation_succeeded = True
+
+            print(f"Prepared {game_name} library update:\n{report['added_count']} added, {report['removed_count']} removed, {len(report['version_changes'])} version changes")
+            print(f"Update candidate: {candidate_directory}")
+
+            self.report({"INFO"}, f"Prepared {game_name} update:\n{report['added_count']} added, {report['removed_count']} removed.")
+            return {"FINISHED"}
+        except Exception as error:
+            print(f"Failed to prepare the {game_name} Asset Library update: {error}")
+            self.report({"ERROR"}, "Failed to prepare the library update. See system console.")
+            return {"CANCELLED"}
+        finally:
+            if (candidate_created and not preparation_succeeded and candidate_directory.is_dir()):
+                shutil.rmtree(candidate_directory, ignore_errors=True)
+
 class WM_OT_DownloadREAssetLibrary(Operator):
     bl_idname = "re_asset.downloadlibrary"
     bl_label = "Download RE Asset Library"
@@ -584,6 +725,7 @@ CLASSES = (
     WM_OT_ImportREAssetLibraryFromCatalog,
     WM_OT_InitializeREAssetLibrary,
     WM_OT_CreateREAssetLibrary,
+    WM_OT_PrepareREAssetLibraryUpdate,
     WM_OT_ImportREAssetLibrary,
     WM_OT_DownloadREAssetLibrary,
     WM_OT_DetectREAssetLibraries,
