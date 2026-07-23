@@ -630,6 +630,66 @@ class WM_OT_ApplyREAssetLibraryUpdate(Operator):
             self.report({"ERROR"}, "Failed to apply the library update. See system console.")
             return {"CANCELLED"}
 
+class WM_OT_DiscardREAssetLibraryUpdate(Operator):
+    bl_idname = "re_asset.discard_library_update"
+    bl_label = "Discard RE Asset Library Update"
+    bl_description = "Delete a prepared update candidate without changing the active library"
+    bl_options = {"INTERNAL"}
+
+    game_name: StringProperty(
+        name="Game Name",
+        description="Library identifier, such as SF6, RE9 or MHWILDS",
+        default=""
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "game_name")
+
+        warning = layout.box()
+        warning.label(text="The prepared update candidate will be deleted.", icon="ERROR")
+        warning.label(text="The active library and rollback backups will not be changed.")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=520)
+
+    def execute(self, context):
+        game_name = self.game_name.strip().upper()
+
+        if not re.fullmatch(r"[A-Z0-9_]+", game_name):
+            self.report({"ERROR"}, "Game Name may only contain letters, numbers and underscores.")
+            return {"CANCELLED"}
+
+        library_directory = _get_library_root() / game_name
+        candidate_directory = library_directory / UPDATE_CANDIDATE_DIRECTORY
+
+        if not candidate_directory.is_dir():
+            self.report({"ERROR"}, f"No prepared update exists for {game_name}.")
+            return {"CANCELLED"}
+
+        try:
+            expected_candidate = library_directory.resolve() / UPDATE_CANDIDATE_DIRECTORY
+            resolved_candidate = candidate_directory.resolve()
+        except OSError as error:
+            print(f"Could not validate update candidate path: {error}")
+            self.report({"ERROR"}, "Could not validate the update candidate path.")
+            return {"CANCELLED"}
+
+        if resolved_candidate != expected_candidate:
+            self.report({"ERROR"}, "Refusing to remove an unexpected update candidate path.")
+            return {"CANCELLED"}
+
+        try:
+            shutil.rmtree(candidate_directory)
+        except OSError as error:
+            print(f"Could not discard update candidate {candidate_directory}: {error}")
+            self.report({"ERROR"}, "Could not discard the prepared update. See system console.")
+            return {"CANCELLED"}
+
+        print(f"Discarded the prepared {game_name} Asset Library update.")
+        self.report({"INFO"}, f"Discarded the prepared {game_name} update.")
+        return {"FINISHED"}
+
 class WM_OT_DownloadREAssetLibrary(Operator):
     bl_idname = "re_asset.downloadlibrary"
     bl_label = "Download RE Asset Library"
@@ -894,6 +954,7 @@ CLASSES = (
     WM_OT_CreateREAssetLibrary,
     WM_OT_PrepareREAssetLibraryUpdate,
     WM_OT_ApplyREAssetLibraryUpdate,
+    WM_OT_DiscardREAssetLibraryUpdate,
     WM_OT_ImportREAssetLibrary,
     WM_OT_DownloadREAssetLibrary,
     WM_OT_DetectREAssetLibraries,
