@@ -79,6 +79,35 @@ def _find_asset_library(name):
     
     return None
 
+def _start_library_initialization(output_blend):
+    output_blend = Path(output_blend)
+    initialize_script = (
+        Path(__file__).resolve().parent
+        / "Resources"
+        / "Scripts"
+        / "initializeLibrary.py"
+    )
+
+    if not output_blend.is_file():
+        raise ValueError(f"Asset Library blend file is missing: {output_blend}")
+
+    if not initialize_script.is_file():
+        raise ValueError(f"Asset Library initialization script is missing: {initialize_script}")
+
+    command = [
+        bpy.app.binary_path,
+        "--background",
+        str(output_blend),
+        "--python",
+        str(initialize_script)
+    ]
+    process_options = {}
+
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+    return subprocess.Popen(command, **process_options)
+
 def _validate_archive_member(member_name):
     normalized_name = member_name.replace("\\", "/")
     relative_path = PurePosixPath(normalized_name)
@@ -335,13 +364,7 @@ class WM_OT_ImportREAssetLibrary(Operator, ImportHelper):
 
             bpy.ops.wm.save_userpref()
 
-            command = [bpy.app.binary_path, "--background", str(output_blend), "--python", str(initialize_script)]
-            process_options = {}
-
-            if hasattr(subprocess, "CREATE_NO_WINDOW"):
-                process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
-
-            subprocess.Popen(command, **process_options)
+            _start_library_initialization(output_blend)
             self.report({"INFO"}, f"Started initializing the {game_name} Asset Library in background Blender.")
             return {"FINISHED"}
         except (
