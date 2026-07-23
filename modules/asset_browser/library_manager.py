@@ -16,7 +16,8 @@ from .asset.re_asset_operators import (
     WM_OT_InitializeREAssetLibrary,
     downloadREAssetLibDirectory,
     download_file_from_google_drive,
-    getFileCRC
+    getFileCRC,
+    REToolListFileToREAssetCatalogAndGameInfo
 )
 
 RE_ASSET_LIBRARY_PREFIX = "RE Assets - "
@@ -174,6 +175,134 @@ def _extract_library_package(package_path, library_root):
 
     library_directory = resolved_root / game_info_parent.parts[0]
     return game_name, library_directory
+
+class WM_OT_CreateREAssetLibrary(Operator, ImportHelper):
+    bl_idname = "re_asset.create_library_from_list"
+    bl_label = "Create RE Asset Library"
+    bl_description = "Create a new RE Asset Library from an RETool list file"
+    bl_options = {"INTERNAL"}
+
+    filename_ext = ".list"
+
+    filter_glob: StringProperty(
+        default="*.list",
+        options={"HIDDEN"}
+    )
+
+    game_name: StringProperty(
+        name="Game Name",
+        description="Short game identifier, such as SF6, RE9 or MHWilds",
+        default=""
+    )
+
+    file_types: StringProperty(
+        name="File Types",
+        description="Comma separated file types to include. Only MESH drag importing is currently enabled in REME",
+        default="mesh"
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "game_name")
+        layout.prop(self, "file_types")
+
+    def execute(self, context):
+        list_path = Path(bpy.path.abspath(self.filepath))
+        game_name = self.game_name.strip().upper()
+        file_types = sorted({
+            file_type.strip().lower()
+            for file_type in self.file_types.split(",") if file_type.strip()
+        })
+
+        if not re.fullmatch(r"[A-Z0-9_]+", game_name):
+            self.report({"ERROR"}, "Game Name may only contain letters, numbers and underscores.")
+            return {"CANCELLED"}
+
+        if not file_types:
+            self.report({"ERROR"}, "At least one file type must be included.")
+            return {"CANCELLED"}
+
+        if not list_path.is_file():
+            self.report({"ERROR"}, f"RETool list file does not exist: {list_path}")
+            return {"CANCELLED"}
+
+        if list_path.suffix.casefold() != ".list":
+            self.report({"ERROR"}, "The selected file is not an RETool .list file.")
+            return {"CANCELLED"}
+
+        library_root = _get_library_root()
+        library_directory = library_root / game_name
+
+        if library_directory.exists():
+            self.report({"ERROR"}, f"{game_name} already has a library folder. Use the library update workflow instead.")
+            return {"CANCELLED"}
+
+        resources_root = Path(__file__).resolve().parent / "Resources"
+        source_blend = resources_root / "Blend" / "libraryBase.blend"
+        initialize_script = (resources_root / "Scripts" / "initializeLibrary.py")
+
+        missing_resources = [
+            path
+            for path in (source_blend, initialize_script) if not path.is_file()
+        ]
+
+        if missing_resources:
+            missing_names = ", ".join(path.name for path in missing_resources)
+            self.report({"ERROR"}, f"Required maintainer resources are missing: {missing_names}")
+            return {"CANCELLED"}
+
+        staging_directory = None
+
+        try:
+            library_root.mkdir(parents=True, exist_ok=True)
+            staging_directory = Path(tempfile.mkdtemp(prefix=f".{game_name}_creating_", dir=library_root))
+
+            catalog_name = f"REAssetCatalog_{game_name}.tsv"
+            game_info_name = f"GameInfo_{game_name}.json"
+            blend_name = f"REAssetLibrary_{game_name}.blend"
+            thumbnail_name = f"REAssetLibrary_{game_name}_thumbnails"
+
+            staging_catalog = staging_directory / catalog_name
+            staging_game_info = staging_directory / game_info_name
+            staging_blend = staging_directory / blend_name
+            staging_thumbnails = staging_directory / thumbnail_name
+
+            REToolListFileToREAssetCatalogAndGameInfo(str(list_path), str(staging_catalog), str(staging_game_info), file_types)
+
+            if not staging_catalog.is_file():
+                raise ValueError("Catalog generation produced no TSV file")
+
+            if not staging_game_info.is_file():
+                raise ValueError("Catalog generation produced no GameInfo file")
+
+            shutil.copy2(source_blend, staging_blend)
+            staging_thumbnails.mkdir()
+
+            staging_directory.rename(library_directory)
+            staging_directory = None
+
+            output_blend = library_directory / blend_name
+            library_name = f"{RE_ASSET_LIBRARY_PREFIX}{game_name}"
+            library = _find_asset_library(library_name)
+            libraries = context.preferences.filepaths.asset_libraries
+
+            if library is None:
+                library = libraries.new(name=library_name, directory=str(library_directory))
+            else:
+                library.path = str(library_directory)
+
+            bpy.ops.wm.save_userpref()
+            _start_library_initialization(output_blend)
+
+            self.report({"INFO"}, f"Created the {game_name} Asset Library, background initialization started.")
+            return {"FINISHED"}
+        except Exception as error:
+            print(f"RE Asset Library creation failed: {error}")
+            self.report({"ERROR"}, "Failed to create the Asset Library. See system console.")
+            return {"CANCELLED"}
+        finally:
+            if (staging_directory is not None and staging_directory.is_dir()):
+                shutil.rmtree(staging_directory, ignore_errors=True)
 
 class WM_OT_DownloadREAssetLibrary(Operator):
     bl_idname = "re_asset.downloadlibrary"
@@ -436,6 +565,7 @@ CLASSES = (
     WM_OT_FetchREAssetThumbnails,
     WM_OT_ImportREAssetLibraryFromCatalog,
     WM_OT_InitializeREAssetLibrary,
+    WM_OT_CreateREAssetLibrary,
     WM_OT_ImportREAssetLibrary,
     WM_OT_DownloadREAssetLibrary,
     WM_OT_DetectREAssetLibraries,
