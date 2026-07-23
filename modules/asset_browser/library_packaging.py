@@ -69,7 +69,7 @@ def build_library_package(library_directory, game_name, output_directory, displa
         raise ValueError("Required library files are missing: " + ", ".join(missing_files))
 
     if not thumbnail_directory.is_dir():
-        raise ValueError(f"Thumbnail directory is missing : {thumbnail_directory.name}")
+        raise ValueError(f"Thumbnail directory is missing: {thumbnail_directory.name}")
 
     output_directory.mkdir(parents=True, exist_ok=True)
 
