@@ -518,6 +518,12 @@ class REMeshPreferences(AddonPreferences):
         default=False
     )
 
+    showAssetLibraryMaintainerTools: BoolProperty(
+        name="Show Asset Library Maintainer Tools",
+        description="Show tools for creating, updating and packaging RE Asset Libraries",
+        default=False
+    )
+
     showConsole: BoolProperty(
         name="Show Console During Import/Export",
         description="When importing or exporting a file, the console will be opened so that progress can be viewed.\nNote that if the console is already opened before import or export, it will be closed instead.\n This is a limitation of Blender, there's no way to get the active state of the console window.",
