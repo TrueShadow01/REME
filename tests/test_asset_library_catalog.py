@@ -119,7 +119,7 @@ class CatalogMergeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate asset"):
             library_catalog.merge_catalog_rows([], duplicate_rows)
 
-    def test_catalog_write_and_read_rount_trip(self):
+    def test_catalog_write_and_read_round_trip(self):
         rows = [
             catalog_row(
                 "characters/hero.mesh",
