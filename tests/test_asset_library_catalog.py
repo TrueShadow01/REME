@@ -136,5 +136,36 @@ class CatalogMergeTests(unittest.TestCase):
 
         self.assertEqual(loaded_rows, rows)
 
+    def test_reports_file_version_changes(self):
+        existing_game_info = {
+            "fileVersionDict": {
+                "MESH_VERSION": "1",
+                "TEX_VERSION": "2"
+            }
+        }
+        generated_game_info = {
+            "fileVersionDict": {
+                "MESH_VERSION": "3",
+                "USER_VERSION": "4"
+            }
+        }
+
+        changes = library_catalog.compare_file_versions(existing_game_info, generated_game_info)
+
+        self.assertEqual(changes, {
+            "MESH_VERSION": {
+                "old": "1",
+                "new": "3"
+            },
+            "TEX_VERSION": {
+                "old": "2",
+                "new": None
+            },
+            "USER_VERSION": {
+                "old": None,
+                "new": "4"
+            }
+        })
+
 if __name__ == "__main__":
     unittest.main()

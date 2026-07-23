@@ -127,3 +127,27 @@ def merge_catalog_files(existing_path, generated_path, output_path):
     merged_rows, report = merge_catalog_rows(existing_rows, generated_rows)
     write_catalog(output_path, merged_rows)
     return report
+
+def compare_file_versions(existing_game_info, generated_game_info):
+    existing_versions = existing_game_info.get("fileVersionDict", {})
+    generated_versions = generated_game_info.get("fileVersionDict", {})
+
+    if not isinstance(existing_versions, dict):
+        raise ValueError("Existing GameInfo has an invalid fileVersionDict")
+
+    if not isinstance(generated_versions, dict):
+        raise ValueError("Generated GameInfo has an invalid fileVersionDict")
+
+    version_changes = {}
+
+    for version_name in sorted(set(existing_versions) | set(generated_versions)):
+        old_version = existing_versions.get(version_name)
+        new_version = generated_versions.get(version_name)
+
+        if old_version != new_version:
+            version_changes[version_name] = {
+                "old": old_version,
+                "new": new_version
+            }
+
+    return version_changes
