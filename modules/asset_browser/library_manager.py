@@ -3,6 +3,8 @@ import shutil
 import zipfile
 import subprocess
 import tempfile
+import json
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 import bpy
 from bpy.types import Operator
@@ -19,8 +21,13 @@ from .asset.re_asset_operators import (
     getFileCRC,
     REToolListFileToREAssetCatalogAndGameInfo
 )
+from .library_catalog import (
+    compare_file_versions,
+    merge_catalog_files
+)
 
 RE_ASSET_LIBRARY_PREFIX = "RE Assets - "
+UPDATE_CANDIDATE_DIRECTORY = ".update_candidate"
 
 _download_library_entries = []
 _download_library_enum_items = []
@@ -70,6 +77,17 @@ def _get_download_library_items(self, context):
 def _get_library_root():
     preferences = _get_reme_preferences()
     return Path(bpy.path.abspath(preferences.assetLibraryPath)).expanduser()
+
+def _load_json_object(file_path):
+    file_path = Path(file_path)
+
+    with file_path.open("r", encoding="utf-8") as stream:
+        value = json.load(stream)
+
+    if not isinstance(value, dict):
+        raise ValueError(f"{file_path.name} must contain a JSON object")
+
+    return value
 
 def _find_asset_library(name):
     libraries = bpy.context.preferences.filepaths.asset_libraries
