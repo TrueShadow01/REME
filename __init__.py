@@ -838,6 +838,24 @@ class REMeshPreferences(AddonPreferences):
         asset_browser_box.prop(self, "placeAtCursor")
         asset_browser_box.prop(self, "forceExtract")
 
+        maintainer_header = asset_browser_box.row()
+        maintainer_icon = (
+            "DOWNARROW_HLT"
+            if self.showAssetLibraryMaintainerTools
+            else "RIGHTARROW"
+        )
+        maintainer_header.prop(self, "showAssetLibraryMaintainerTools", text="Asset Library Maintainer Tools", icon=maintainer_icon, emboss=False)
+
+        if self.showAssetLibraryMaintainerTools:
+            maintainer_box = asset_browser_box.box()
+            maintainer_box.label(text="These tools are intended for library maintainers.", icon="INFO")
+            maintainer_box.operator("re_asset.create_library_from_list", text="Create Library from RETool List", icon="ADD")
+            maintainer_box.operator("re_asset.prepare_library_update", text="Prepare Library Update", icon="FILE_REFRESH")
+
+            update_row = maintainer_box.row(align=True)
+            update_row.operator("re_asset.apply_library_update", text="Apply Prepared Update", icon="CHECKMARK")
+            update_row.operator("re_asset.discard_library_update", text="Discard Prepared Update", icon="TRASH")
+
         layout.label(text="Chunk Path List")
         layout.prop(self, "saveChunkPaths")
         layout.template_list(
