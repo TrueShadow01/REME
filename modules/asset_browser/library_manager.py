@@ -450,10 +450,10 @@ class WM_OT_PrepareREAssetLibraryUpdate(Operator, ImportHelper):
 
             preparation_succeeded = True
 
-            print(f"Prepared {game_name} library update:\n{report['added_count']} added, {report['removed_count']} removed, {len(report['version_changes'])} version changes")
+            print(f"Prepared {game_name} library update: {report['added_count']} added, {report['removed_count']} removed, {len(report['version_changes'])} version changes")
             print(f"Update candidate: {candidate_directory}")
 
-            self.report({"INFO"}, f"Prepared {game_name} update:\n{report['added_count']} added, {report['removed_count']} removed.")
+            self.report({"INFO"}, f"Prepared {game_name} update: {report['added_count']} added, {report['removed_count']} removed.")
             return {"FINISHED"}
         except Exception as error:
             print(f"Failed to prepare the {game_name} Asset Library update: {error}")
@@ -462,6 +462,173 @@ class WM_OT_PrepareREAssetLibraryUpdate(Operator, ImportHelper):
         finally:
             if (candidate_created and not preparation_succeeded and candidate_directory.is_dir()):
                 shutil.rmtree(candidate_directory, ignore_errors=True)
+
+class WM_OT_ApplyREAssetLibraryUpdate(Operator):
+    bl_idname = "re_asset.apply_library_update"
+    bl_label = "Apply RE Asset Library Update"
+    bl_description = "Apply a prepared update and rebuild the library"
+    bl_options = {"INTERNAL"}
+
+    game_name: StringProperty(
+        name="Game Name",
+        description="Library identifier, such as SF6, RE9 or MHWILDS",
+        default=""
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "game_name")
+
+        game_name = self.game_name.strip().upper()
+
+        if re.fullmatch(r"[A-Z0-9_]+", game_name):
+            report_path = _get_library_root() / game_name / UPDATE_CANDIDATE_DIRECTORY / "update_report.json"
+
+            if report_path.is_file():
+                try:
+                    report = _load_json_object(report_path)
+                    summary = layout.box()
+                    summary.label(text=f"Added assets: {report.get('added_count', 0)}")
+                    summary.label(text=f"Removed assets: {report.get('removed_count', 0)}")
+                    summary.label(text=f"File version changes: {len(report.get('version_changes', {}))}")
+                except (OSError, ValueError, json.JSONDecodeError):
+                    layout.label(text="The update report is invalid.", icon="ERROR")
+
+        warning = layout.box()
+        warning.label(text="The library blend will be rebuilt.", icon="ERROR")
+        warning.label(text="Save any catalog edits before applying.")
+        warning.label(text="A rollback backup will be retained.")
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=520)
+
+    def execute(self, context):
+        game_name = self.game_name.strip().upper()
+
+        if not re.fullmatch(r"[A-Z0-9_]+", game_name):
+            self.report({"ERROR"}, "Game Name may only contain letters, numbers and underscores.")
+            return {"CANCELLED"}
+
+        library_root = _get_library_root()
+        library_directory = library_root / game_name
+        candidate_directory = library_directory / UPDATE_CANDIDATE_DIRECTORY
+
+        catalog_name = f"REAssetCatalog_{game_name}.tsv"
+        game_info_name = f"GameInfo_{game_name}.json"
+        blend_name = f"REAssetLibrary_{game_name}.blend"
+
+        active_catalog = library_directory / catalog_name
+        active_game_info = library_directory / game_info_name
+        active_blend = library_directory / blend_name
+
+        candidate_catalog = candidate_directory / catalog_name
+        candidate_game_info = candidate_directory / game_info_name
+        candidate_report = candidate_directory / "update_report.json"
+
+        resources_root = Path(__file__).resolve().parent() / "Resources"
+        source_blend = resources_root / "Blend" / "libraryBase.blend"
+
+        required_files = (
+            active_catalog,
+            active_game_info,
+            active_blend,
+            candidate_catalog,
+            candidate_game_info,
+            candidate_report,
+            source_blend
+        )
+
+        missing_files = [path for path in required_files if not path.is_file()]
+
+        if missing_files:
+            missing_names = ", ".join(path.name for path in missing_files)
+            self.report({"ERROR"}, f"Required update files are missing: {missing_names}")
+            return {"CANCELLED"}
+
+        try:
+            report = _load_json_object(candidate_report)
+            new_game_info = _load_json_object(candidate_game_info)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"Failed to validate update candidate: {error}")
+            self.report({"ERROR"}, "The prepared update candidate is invalid.")
+            return {"CANCELLED"}
+
+        if str(report.get("game_name", "")).upper() != game_name:
+            self.report({"ERROR"}, "The update report belongs to a different game.")
+            return {"CANCELLED"}
+
+        if str(new_game_info.get("GameName", "")).upper() != game_name:
+            self.report({"ERROR"}, "The candidate GameInfo belongs to a different game.")
+            return {"CANCELLED"}
+
+        current_blend_path = bpy.path.abspath(bpy.context.blend_data.filepath)
+
+        if current_blend_path:
+            try:
+                if (Path(current_blend_path).resolve() == active_blend.resolve()):
+                    self.report({"ERROR"}, "Close the Asset Library blend before applying its update.")
+                    return {"CANCELLED"}
+            except OSError:
+                pass
+
+        backup_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
+        backup_directory = library_root / "_LibraryBackups" / game_name / backup_timestamp
+        backup_catalog = backup_directory / catalog_name
+        backup_game_info = backup_directory / game_info_name
+        backup_blend = backup_directory / blend_name
+        backup_report = backup_directory / "update_report.json"
+
+        blend_moved = False
+        initialization_started = False
+
+        try:
+            backup_directory.mkdir(parents=True)
+
+            shutil.copy2(active_catalog, backup_catalog)
+            shutil.copy2(active_game_info, backup_game_info)
+            shutil.copy2(candidate_report, backup_report)
+
+            active_blend.replace(backup_blend)
+            blend_moved = True
+
+            shutil.copy2(candidate_catalog, active_catalog)
+            shutil.copy2(candidate_game_info, active_game_info)
+            shutil.copy2(source_blend, active_blend)
+
+            _start_library_initialization(active_blend)
+            initialization_started = True
+
+            try:
+                shutil.rmtree(candidate_directory)
+            except OSError as error:
+                print(f"Could not remove update candidate {candidate_directory}: {error}")
+
+            print(f"Applied {game_name} library update. Rollback backup: {backup_directory}")
+            self.report({"INFO"}, f"Applied {game_name} update, background initialization started.")
+            return {"FINISHED"}
+        except Exception as error:
+            print(f"Failed to apply the {game_name} Asset Library update: {error}")
+
+            if not initialization_started:
+                try:
+                    if blend_moved and backup_blend.is_file():
+                        if active_blend.exists():
+                            active_blend.unlink()
+
+                        backup_blend.replace(active_blend)
+
+                    if backup_catalog.is_file():
+                        shutil.copy2(backup_catalog, active_catalog)
+
+                    if backup_game_info.is_file():
+                        shutil.copy2(backup_game_info, active_game_info)
+
+                    print("Restored the previous library files.")
+                except OSError as rollback_error:
+                    print(f"Library rollback failed: {rollback_error}")
+            
+            self.report({"ERROR"}, "Failed to apply the library update. See system console.")
+            return {"CANCELLED"}
 
 class WM_OT_DownloadREAssetLibrary(Operator):
     bl_idname = "re_asset.downloadlibrary"
@@ -726,6 +893,7 @@ CLASSES = (
     WM_OT_InitializeREAssetLibrary,
     WM_OT_CreateREAssetLibrary,
     WM_OT_PrepareREAssetLibraryUpdate,
+    WM_OT_ApplyREAssetLibraryUpdate,
     WM_OT_ImportREAssetLibrary,
     WM_OT_DownloadREAssetLibrary,
     WM_OT_DetectREAssetLibraries,
