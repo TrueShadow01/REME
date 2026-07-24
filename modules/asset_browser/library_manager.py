@@ -25,7 +25,6 @@ from .library_catalog import (
     compare_file_versions,
     merge_catalog_files
 )
-from .library_packaging import build_library_package
 
 RE_ASSET_LIBRARY_PREFIX = "RE Assets - "
 UPDATE_CANDIDATE_DIRECTORY = ".update_candidate"
@@ -787,6 +786,7 @@ class WM_OT_PackageREAssetLibrary(Operator):
         information = layout.box()
         information.label(text="Wait for background library initialization to finish before packaging.", icon="INFO")
         information.label(text="Packages are saved under _Packages inside the Asset Library Path.")
+        information.label(text="Packaging runs in the background, Blender remains usable.")
 
         if not self.drive_file_id.strip():
             information.label(text="The directory entry URL will be blank until a Drive File ID is supplied.")
@@ -883,6 +883,14 @@ class WM_OT_PackageREAssetLibrary(Operator):
             self.report({"ERROR"}, "Enter only the Google Drive File ID, not its full URL.")
             return {"CANCELLED"}
 
+        existing_process = _active_packaging_processes.get(game_name)
+        if existing_process is not None:
+            if existing_process.poll() is None:
+                self.report({"ERROR"}, f"{game_name} is already being packaged.")
+                return {"CANCELLED"}
+
+            _active_packaging_processes.pop(game_name, None)
+
         library_root = _get_library_root()
         library_directory = library_root / game_name
         candidate_directory = library_directory / UPDATE_CANDIDATE_DIRECTORY
@@ -893,22 +901,26 @@ class WM_OT_PackageREAssetLibrary(Operator):
             return {"CANCELLED"}
 
         try:
-            result = build_library_package(library_directory, game_name, output_directory, display_name=self.display_name, release_description=self.release_description, drive_file_id=drive_file_id)
+            process, log_stream, log_path = _start_library_packaging(library_directory, game_name, output_directory, self.display_name, self.release_description, drive_file_id)
         except Exception as error:
-            print(f"Failed to package the {game_name} Asset Library: {error}")
-            self.report({"ERROR"}, "Failed to package the Asset Library. See system console.")
+            print(f"Failed to start background packaging for {game_name}: {error}")
+            self.report({"ERROR"}, "Could not start background packaging. See system console.")
             return {"CANCELLED"}
 
-        package_path = result["package_path"]
-        metadata_path = result["metadata_path"]
+        self._packaging_process = process
+        self._packaging_log_stream = log_stream
+        self._packaging_log_path = log_path
+        self._packaging_output_directory = output_directory
+        self._packaging_game_name = game_name
 
-        print(f"Created Asset Library package: {package_path}")
-        print(f"Created directory metadata: {metadata_path}")
-        print(json.dumps(result["directory_entry"], indent=4, sort_keys=False))
+        _active_packaging_processes[game_name] = process
 
-        openFolder(str(output_directory))
-        self.report({"INFO"}, f"Packaged {game_name} Asset Library.")
-        return {"FINISHED"}
+        self._packaging_timer = context.window_manager.event_timer_add(0.5, window=context.window)
+        context.window_manager.modal_handler_add(self)
+
+        print(f"Started background packaging for {game_name}. Log: {log_path}")
+        self.report({"INFO"}, f"Started packaging {game_name} in the background.")
+        return {"RUNNING_MODAL"}
 
 class WM_OT_DownloadREAssetLibrary(Operator):
     bl_idname = "re_asset.downloadlibrary"
