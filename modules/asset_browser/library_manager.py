@@ -634,7 +634,7 @@ class WM_OT_ApplyREAssetLibraryUpdate(Operator):
         candidate_game_info = candidate_directory / game_info_name
         candidate_report = candidate_directory / "update_report.json"
 
-        resources_root = Path(__file__).resolve().parent() / "Resources"
+        resources_root = Path(__file__).resolve().parent / "Resources"
         source_blend = resources_root / "Blend" / "libraryBase.blend"
 
         required_files = (
