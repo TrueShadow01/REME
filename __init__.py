@@ -2342,6 +2342,10 @@ def register():
 
 def unregister():
     asset_browser.unregister()
+
+    from . import addon_updater_ops
+    addon_updater_ops.unregister()
+
     del bpy.types.WindowManager.enableModFileTracking
     for classEntry in classes:
         bpy.utils.unregister_class(classEntry)
