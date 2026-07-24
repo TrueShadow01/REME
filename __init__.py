@@ -856,6 +856,9 @@ class REMeshPreferences(AddonPreferences):
             update_row.operator("re_asset.apply_library_update", text="Apply Prepared Update", icon="CHECKMARK")
             update_row.operator("re_asset.discard_library_update", text="Discard Prepared Update", icon="TRASH")
 
+            maintainer_box.separator()
+            maintainer_box.operator("re_asset.package_library", text="Package Library", icon="EXPORT")
+
         layout.label(text="Chunk Path List")
         layout.prop(self, "saveChunkPaths")
         layout.template_list(
