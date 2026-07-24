@@ -31,6 +31,7 @@ RE_ASSET_LIBRARY_PREFIX = "RE Assets - "
 UPDATE_CANDIDATE_DIRECTORY = ".update_candidate"
 
 _download_library_entries = []
+_active_packaging_processes = {}
 _download_library_enum_items = []
 
 _REQUIRED_DOWNLOAD_FIELDS = frozenset({
@@ -127,6 +128,54 @@ def _start_library_initialization(output_blend):
         process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
 
     return subprocess.Popen(command, **process_options)
+
+def _start_library_packaging(library_directory, game_name, output_directory, display_name, release_description, drive_file_id):
+    library_directory = Path(library_directory)
+    output_directory = Path(output_directory)
+    packaging_script = Path(__file__).resolve().parent / "Resources" / "Scripts" / "packageLibrary.py"
+
+    if not packaging_script.is_file():
+        raise ValueError(f"Library packaging script is missing: {packaging_script}")
+
+    output_directory.mkdir(parents=True, exist_ok=True)
+    log_path = output_directory / f"package_{game_name}.log"
+
+    command = [
+        bpy.app.binary_path,
+        "--background",
+        "--factory-startup",
+        "--python-exit-code",
+        "1",
+        "--python",
+        str(packaging_script),
+        "--",
+        "--library-directory",
+        str(library_directory),
+        "--game-name",
+        game_name,
+        "--output-directory",
+        str(output_directory),
+        "--display-name",
+        str(display_name),
+        "--release-description",
+        str(release_description),
+        "--drive-file-id",
+        str(drive_file_id)
+    ]
+    process_options = {}
+
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+    log_stream = log_path.open("wb")
+
+    try:
+        process = subprocess.Popen(command, stdout=log_stream, stderr=subprocess.STDOUT, **process_options)
+    except Exception:
+        log_stream.close()
+        raise
+
+    return process, log_stream, log_path
 
 def _validate_archive_member(member_name):
     normalized_name = member_name.replace("\\", "/")
