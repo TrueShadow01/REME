@@ -746,6 +746,13 @@ class WM_OT_PackageREAssetLibrary(Operator):
     bl_description = "Create a distributable .reassetlib package and directory metadata"
     bl_options = {"INTERNAL"}
 
+    _packaging_process = None
+    _packaging_log_stream = None
+    _packaging_log_path = None
+    _packaging_timer = None
+    _packaging_output_directory = None
+    _packaging_game_name = None
+
     game_name: StringProperty(
         name="Game Name",
         description="Library identifier, such as SF6, RE9 or MHWILDS",
@@ -786,6 +793,83 @@ class WM_OT_PackageREAssetLibrary(Operator):
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=600)
+
+    def _finish_background_packaging(self, context):
+        process = self._packaging_process
+        game_name = self._packaging_game_name
+
+        if self._packaging_timer is not None:
+            context.window_manager.event_timer_remove(self._packaging_timer)
+            self._packaging_timer = None
+
+        if self._packaging_log_stream is not None:
+            self._packaging_log_stream.close()
+            self._packaging_log_stream = None
+
+        if (game_name and _active_packaging_processes.get(game_name) is process):
+            _active_packaging_processes.pop(game_name, None)
+
+        self._packaging_process = None
+
+    def modal(self, context, event):
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        process = self._packaging_process
+
+        if process is None:
+            self._finish_background_packaging(context)
+            self.report({"ERROR"}, "The background packaging process was lost.")
+            return {"CANCELLED"}
+
+        return_code = process.poll()
+        if return_code is None:
+            return {"PASS_THROUGH"}
+
+        game_name = self._packaging_game_name
+        output_directory = self._packaging_output_directory
+        log_path = self._packaging_log_path
+
+        self._finish_background_packaging(context)
+
+        if return_code != 0:
+            print(f"Background packaging failed for {game_name}. Log: {log_path}")
+
+            try:
+                log_output = log_path.read_text(encoding="utf-8", errors="replace").strip()
+
+                if log_output:
+                    print(log_output)
+            except OSError as error:
+                print(f"Could not read packaging log: {error}")
+
+            self.report({"ERROR"}, f"Failed to package {game_name}. See packaging log.")
+            return {"CANCELLED"}
+
+        package_path = output_directory / f"{game_name}.reassetlib"
+        metadata_path = output_directory / f"REAssetLib_entry_{game_name}.json"
+
+        try:
+            if not package_path.is_file():
+                raise ValueError(f"Package was not created: {package_path}")
+
+            directory_entry = _load_json_object(metadata_path)
+        except (OSError, ValueError) as error:
+            print(f"Background packaging output is invalid: {error}")
+            self.report({"ERROR"}, "Packaging finished without valid output files.")
+            return {"CANCELLED"}
+
+        print(f"Created Asset Library package: {package_path}")
+        print(f"Created directory metadata: {metadata_path}")
+        print(json.dumps(directory_entry, indent=4, sort_keys=False))
+
+        try:
+            openFolder(str(output_directory))
+        except Exception as error:
+            print(f"Could not open packaging output folder: {error}")
+
+        self.report({"INFO"}, f"Packaged {game_name} Asset Library.")
+        return {"FINISHED"}
 
     def execute(self, context):
         game_name = self.game_name.strip().upper()
