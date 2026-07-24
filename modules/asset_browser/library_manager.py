@@ -25,6 +25,7 @@ from .library_catalog import (
     compare_file_versions,
     merge_catalog_files
 )
+from .library_packaging import build_library_package
 
 RE_ASSET_LIBRARY_PREFIX = "RE Assets - "
 UPDATE_CANDIDATE_DIRECTORY = ".update_candidate"
@@ -690,6 +691,92 @@ class WM_OT_DiscardREAssetLibraryUpdate(Operator):
         self.report({"INFO"}, f"Discarded the prepared {game_name} update.")
         return {"FINISHED"}
 
+class WM_OT_PackageREAssetLibrary(Operator):
+    bl_idname = "re_asset.package_library"
+    bl_label = "Package RE Asset Library"
+    bl_description = "Create a distributable .reassetlib package and directory metadata"
+    bl_options = {"INTERNAL"}
+
+    game_name: StringProperty(
+        name="Game Name",
+        description="Library identifier, such as SF6, RE9 or MHWILDS",
+        default=""
+    )
+
+    display_name: StringProperty(
+        name="Display Name",
+        description="Public library name, such as Street Fighter 6 or Resident Evil 9",
+        default=""
+    )
+
+    release_description: StringProperty(
+        name="Release Description",
+        description="Description of the game version and library changes",
+        default=""
+    )
+
+    drive_file_id: StringProperty(
+        name="Google Drive File ID",
+        description="Optional Google Drive File ID. Leave blank until the package has been uploaded",
+        default=""
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "game_name")
+        layout.prop(self, "display_name")
+        layout.prop(self, "release_description")
+        layout.prop(self, "drive_file_id")
+
+        information = layout.box()
+        information.label(text="Wait for background library initialization to finish before packaging.", icon="INFO")
+        information.label(text="Packages are saved under _Packages inside the Asset Library Path.")
+
+        if not self.drive_file_id.strip():
+            information.label(text="The directory entry URL will be blank until a Drive File ID is supplied.")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=600)
+
+    def execute(self, context):
+        game_name = self.game_name.strip().upper()
+        drive_file_id = self.drive_file_id.strip()
+
+        if not re.fullmatch(r"[A-Z0-9_]+", game_name):
+            self.report({"ERROR"}, "Game Name may only contain letters, numbers and underscores.")
+            return {"CANCELLED"}
+
+        if (drive_file_id and not re.fullmatch(r"[A-Za-z0-9_-]+", drive_file_id)):
+            self.report({"ERROR"}, "Enter only the Google Drive File ID, not its full URL.")
+            return {"CANCELLED"}
+
+        library_root = _get_library_root()
+        library_directory = library_root / game_name
+        candidate_directory = library_directory / UPDATE_CANDIDATE_DIRECTORY
+        output_directory = library_root / "_Packages" / game_name
+
+        if candidate_directory.exists():
+            self.report({"ERROR"}, "Apply or discard the prepared update before packaging.")
+            return {"CANCELLED"}
+
+        try:
+            result = build_library_package(library_directory, game_name, output_directory, display_name=self.display_name, release_description=self.release_description, drive_file_id=drive_file_id)
+        except Exception as error:
+            print(f"Failed to package the {game_name} Asset Library: {error}")
+            self.report({"ERROR"}, "Failed to package the Asset Library. See system console.")
+            return {"CANCELLED"}
+
+        package_path = result["package_path"]
+        metadata_path = result["metadata_path"]
+
+        print(f"Created Asset Library package: {package_path}")
+        print(f"Created directory metadata: {metadata_path}")
+        print(json.dumps(result["directory_entry"], indent=4, sort_keys=False))
+
+        openFolder(str(output_directory))
+        self.report({"INFO"}, f"Packaged {game_name} Asset Library.")
+        return {"FINISHED"}
+
 class WM_OT_DownloadREAssetLibrary(Operator):
     bl_idname = "re_asset.downloadlibrary"
     bl_label = "Download RE Asset Library"
@@ -955,6 +1042,7 @@ CLASSES = (
     WM_OT_PrepareREAssetLibraryUpdate,
     WM_OT_ApplyREAssetLibraryUpdate,
     WM_OT_DiscardREAssetLibraryUpdate,
+    WM_OT_PackageREAssetLibrary,
     WM_OT_ImportREAssetLibrary,
     WM_OT_DownloadREAssetLibrary,
     WM_OT_DetectREAssetLibraries,
